@@ -34,12 +34,23 @@ const providerKeys = [
   "OPENCODE_GO_API_KEY",
 ] as const;
 
+const localHosts = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+function isLocalhostUrl(value: string) {
+  try {
+    return localHosts.has(new URL(value).hostname);
+  } catch {
+    return false;
+  }
+}
+
 const serverEnvSchema = z
   .object({
     NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
     VERCEL_ENV: z.enum(["development", "preview", "production"]).optional(),
     DATABASE_URL: z.url({ protocol: /^postgres(ql)?$/ }),
     TEST_DATABASE_URL: optionalUrl,
+    MIGRATION_DATABASE_URL: optionalUrl,
     AUTH_SECRET: z.string().min(32),
     AUTH_GOOGLE_ID: z.string().trim().min(1),
     AUTH_GOOGLE_SECRET: z.string().trim().min(1),
@@ -62,13 +73,26 @@ const serverEnvSchema = z
     OPENCODE_GO_API_KEY: optionalNonEmptyString,
     OPENCODE_GO_MODEL: z.string().trim().min(1).default("deepseek-v4-flash"),
     OPENCODE_GO_BASE_URL: z.url().default("https://opencode.ai/zen/go/v1"),
-    APP_BASE_URL: z.url().default("http://localhost:3000"),
+    APP_BASE_URL: optionalUrl,
   })
   .superRefine((value, context) => {
-    const isProduction =
-      value.NODE_ENV === "production" && value.VERCEL_ENV !== "preview";
+    const deploymentEnv = value.VERCEL_ENV ?? value.NODE_ENV;
 
-    if (!isProduction) return;
+    if (deploymentEnv !== "production") return;
+
+    if (!value.APP_BASE_URL) {
+      context.addIssue({
+        code: "custom",
+        path: ["APP_BASE_URL"],
+        message: "APP_BASE_URL is required in production",
+      });
+    } else if (isLocalhostUrl(value.APP_BASE_URL)) {
+      context.addIssue({
+        code: "custom",
+        path: ["APP_BASE_URL"],
+        message: "APP_BASE_URL must not use localhost in production",
+      });
+    }
 
     for (const key of providerKeys) {
       if (!value[key]) {
@@ -79,7 +103,11 @@ const serverEnvSchema = z
         });
       }
     }
-  });
+  })
+  .transform((value) => ({
+    ...value,
+    APP_BASE_URL: value.APP_BASE_URL ?? "http://localhost:3000",
+  }));
 
 export type ServerEnv = z.infer<typeof serverEnvSchema>;
 
