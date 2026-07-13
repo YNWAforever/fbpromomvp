@@ -4,6 +4,7 @@ import { assertSameVenue } from "@/db/repositories/ownership";
 import type { StaffIdentity } from "@/lib/auth/require-staff";
 import { scoreVenueMatch } from "@/domain/venues/match";
 import { canActivateVenue } from "@/domain/venues/activation";
+import { appendAuditEvent } from "@/db/repositories/audit";
 
 export type ConfirmMatchInput = {
   db: DatabaseExecutor;
@@ -63,7 +64,14 @@ export async function confirmMatch(input: ConfirmMatchInput): Promise<ConfirmMat
     },
     confirmedAt,
   });
-  const templates = await listActiveOfferTemplates(input.db, input.venueId);
+  await appendAuditEvent(input.db, {
+    actorType: "staff",
+    actorId: input.staff.id,
+    action: "venue_match_confirmed",
+    objectType: "venue",
+    objectId: input.venueId,
+    metadata: { provider: "besttime", providerVenueId: snapshot.providerVenueId, matchScore: match.totalScore, outcome: "confirmed" },
+  });  const templates = await listActiveOfferTemplates(input.db, input.venueId);
   const integrations = await listVenueIntegrations(input.db, input.venueId);
   const woztell = integrations.find((integration) => integration.provider === "woztell");
   const metadata = (woztell?.metadata ?? {}) as Record<string, unknown>;

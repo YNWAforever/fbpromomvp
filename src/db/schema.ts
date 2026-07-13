@@ -26,6 +26,7 @@ export const staffUsers = pgTable("staff_users", {
 
 export const venues = pgTable("venues", {
   id: id(),
+  idempotencyKey: text("idempotency_key"),
   createdAt: createdAt(),
   name: text("name").notNull(),
   address: text("address").notNull(),
@@ -40,7 +41,7 @@ export const venues = pgTable("venues", {
   approvalTimeoutMinutes: integer("approval_timeout_minutes").notNull().default(15),
   baselineSales: doublePrecision("baseline_sales"),
   averageOrderValue: doublePrecision("average_order_value"),
-});
+}, (table) => [uniqueIndex("venues_idempotency_key_idx").on(table.idempotencyKey)]);
 
 export const venueIntegrations = pgTable(
   "venue_integrations",
@@ -68,6 +69,7 @@ export const offerTemplates = pgTable("offer_templates", {
 
 export const forecastSnapshots = pgTable("forecast_snapshots", {
   id: id(),
+  requestKey: text("request_key"),
   createdAt: createdAt(),
   venueId: uuid("venue_id").notNull().references(() => venues.id, { onDelete: "cascade" }),
   providerVenueId: text("provider_venue_id"),
@@ -77,7 +79,7 @@ export const forecastSnapshots = pgTable("forecast_snapshots", {
   payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default({}),
   fetchedAt: timestamp("fetched_at", { withTimezone: true, mode: "date" }).notNull(),
   expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }).notNull(),
-});
+}, (table) => [uniqueIndex("forecast_snapshots_venue_request_idx").on(table.venueId, table.requestKey)]);
 
 export const liveReadings = pgTable(
   "live_readings",

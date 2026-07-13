@@ -7,9 +7,24 @@ export type NewVenueIntegration = typeof venueIntegrations.$inferInsert;
 export type NewOfferTemplate = typeof offerTemplates.$inferInsert;
 export type NewForecastSnapshot = typeof forecastSnapshots.$inferInsert;
 
-export async function createVenue(db: DatabaseExecutor, values: NewVenue) {
+export async function createVenueIdempotent(db: DatabaseExecutor, values: NewVenue) {
+  if (values.idempotencyKey) {
+    const [venue] = await db
+      .insert(venues)
+      .values(values)
+      .onConflictDoNothing({ target: venues.idempotencyKey })
+      .returning();
+    if (venue) return { venue, created: true };
+    const existing = await getVenueByIdempotencyKey(db, values.idempotencyKey);
+    if (existing) return { venue: existing, created: false };
+    throw new Error(`venue idempotency key ${values.idempotencyKey} was not persisted`);
+  }
   const [venue] = await db.insert(venues).values(values).returning();
-  return venue;
+  return { venue, created: true };
+}
+
+export async function createVenue(db: DatabaseExecutor, values: NewVenue) {
+  return (await createVenueIdempotent(db, values)).venue;
 }
 
 export async function getVenue(db: DatabaseExecutor, id: string) {
@@ -21,6 +36,10 @@ export async function listActiveVenues(db: DatabaseExecutor) {
   return db.select().from(venues).where(eq(venues.status, "active")).orderBy(venues.name);
 }
 
+export async function getVenueByIdempotencyKey(db: DatabaseExecutor, idempotencyKey: string) {
+  const [venue] = await db.select().from(venues).where(eq(venues.idempotencyKey, idempotencyKey)).limit(1);
+  return venue;
+}
 export async function updateVenue(db: DatabaseExecutor, id: string, values: Partial<NewVenue>) {
   const [venue] = await db
     .update(venues)
@@ -64,10 +83,26 @@ export async function listActiveOfferTemplates(db: DatabaseExecutor, venueId: st
 }
 
 export async function createForecastSnapshot(db: DatabaseExecutor, values: NewForecastSnapshot) {
+  if (values.requestKey) {
+    const [snapshot] = await db
+      .insert(forecastSnapshots)
+      .values(values)
+      .onConflictDoNothing({ target: [forecastSnapshots.venueId, forecastSnapshots.requestKey] })
+      .returning();
+    return snapshot ?? getForecastSnapshotByRequestKey(db, values.venueId, values.requestKey);
+  }
   const [snapshot] = await db.insert(forecastSnapshots).values(values).returning();
   return snapshot;
 }
 
+export async function getForecastSnapshotByRequestKey(db: DatabaseExecutor, venueId: string, requestKey: string) {
+  const [snapshot] = await db
+    .select()
+    .from(forecastSnapshots)
+    .where(and(eq(forecastSnapshots.venueId, venueId), eq(forecastSnapshots.requestKey, requestKey)))
+    .limit(1);
+  return snapshot;
+}
 export async function getLatestForecastSnapshot(db: DatabaseExecutor, venueId: string) {
   const [snapshot] = await db
     .select()

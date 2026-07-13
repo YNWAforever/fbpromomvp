@@ -80,4 +80,26 @@ describe("BestTime adapter", () => {
     await expect(client.getLive("bt-123")).resolves.toMatchObject({ status: "unavailable", delta: null });
     expect(fetchMock).not.toHaveBeenCalled();
   });
-});
+
+  it("rejects venue-info-only coverage responses as unavailable", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ venue_info: { venue_id: "bt-123", venue_name: "Harbour Cafe", venue_address: "18 Queen's Road" } }), { status: 200 }),
+    );
+    const client = createBestTimeClient({ baseUrl: "https://besttime.test/api/v1", privateKey: "private-secret", fetch: fetchMock });
+    await expect(client.checkCoverage({ name: "Harbour Cafe", address: "18 Queen's Road" })).resolves.toMatchObject({ available: false, reason: "no_data" });
+  });
+
+  it("aborts a provider request at the configured timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchMock = vi.fn<typeof fetch>().mockImplementation((_url, init) => new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(new DOMException("The operation was aborted", "AbortError")));
+      }));
+      const client = createBestTimeClient({ baseUrl: "https://besttime.test/api/v1", privateKey: "private-secret", timeoutMs: 1_000, fetch: fetchMock });
+      const pending = client.checkCoverage({ name: "Harbour Cafe", address: "18 Queen's Road" });
+      await vi.advanceTimersByTimeAsync(1_000);
+      await expect(pending).resolves.toMatchObject({ available: false, reason: "provider_error" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });});

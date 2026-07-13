@@ -53,14 +53,20 @@ function minutes(value: string): number {
 export function isWithinBusinessHours(instant: Date, timezone: string, businessHours: NormalizedBusinessHours): boolean {
   const local = DateTime.fromJSDate(instant, { zone: timezone });
   if (!local.isValid) return false;
-  const windows = businessHours[String(local.weekday % 7)] ?? [];
+  const day = local.weekday % 7;
+  const previousDay = (day + 6) % 7;
   const localMinutes = local.hour * 60 + local.minute;
-  return windows.some((window) => {
+  const matches = (window: CoverageWindow, overnightTail: boolean) => {
     const start = minutes(window.start);
     const end = minutes(window.end);
     if (start === end) return false;
-    return end > start ? localMinutes >= start && localMinutes < end : localMinutes >= start || localMinutes < end;
-  });
+    if (end > start) return !overnightTail && localMinutes >= start && localMinutes < end;
+    return overnightTail ? localMinutes < end : localMinutes >= start;
+  };
+  const currentWindows = businessHours[String(day)] ?? [];
+  if (currentWindows.some((window) => matches(window, false))) return true;
+  const previousWindows = businessHours[String(previousDay)] ?? [];
+  return previousWindows.some((window) => matches(window, true));
 }
 
 export type ActivationRequirements = {

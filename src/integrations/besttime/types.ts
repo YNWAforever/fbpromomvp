@@ -13,5 +13,7 @@ export type BestTimeClientOptions = {
   publicKey?: string;
   fetch?: typeof globalThis.fetch;
   now?: () => Date;
+  /** Maximum time allowed for a provider request before it is aborted. */
+  timeoutMs?: number;
 };
 

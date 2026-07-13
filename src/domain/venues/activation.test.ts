@@ -24,6 +24,17 @@ describe("venue activation and local coverage windows", () => {
     expect(isWithinBusinessHours(new Date("2026-03-08T08:30:00.000Z"), "America/New_York", hours)).toBe(false);
   });
 
+  it("keeps an overnight window open after midnight on the following local day", () => {
+    const hours = normalizeBusinessHours({ Monday: [{ start: "22:00", end: "02:00" }] });
+    expect(isWithinBusinessHours(new Date("2026-07-14T01:00:00.000Z"), "UTC", hours)).toBe(true);
+    expect(isWithinBusinessHours(new Date("2026-07-14T03:00:00.000Z"), "UTC", hours)).toBe(false);
+  });
+
+  it("handles an overnight window across the DST fall-back transition", () => {
+    const hours = normalizeBusinessHours({ Sunday: [{ start: "22:00", end: "02:00" }] });
+    expect(isWithinBusinessHours(new Date("2026-11-02T06:30:00.000Z"), "America/New_York", hours)).toBe(true);
+    expect(isWithinBusinessHours(new Date("2026-11-02T08:00:00.000Z"), "America/New_York", hours)).toBe(false);
+  });
   it("rejects stale, unavailable, and future live readings", () => {
     const now = new Date("2026-07-13T04:00:00.000Z");
     expect(isLiveReadingFresh({ observedAt: new Date("2026-07-13T03:59:00.000Z"), status: "ok", delta: -20 }, now)).toBe(true);

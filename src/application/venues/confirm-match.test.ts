@@ -6,8 +6,10 @@ const repo = vi.hoisted(() => ({
   upsertVenueIntegration: vi.fn(),
   listActiveOfferTemplates: vi.fn(),
   listVenueIntegrations: vi.fn(),
+  appendAuditEvent: vi.fn(),
 }));
 vi.mock("@/db/repositories/venues", () => repo);
+vi.mock("@/db/repositories/audit", () => ({ appendAuditEvent: repo.appendAuditEvent }));
 
 import { confirmMatch } from "./confirm-match";
 
@@ -32,6 +34,17 @@ describe("confirmMatch", () => {
     expect(repo.upsertVenueIntegration).not.toHaveBeenCalled();
   });
 
+  it("appends an audit event for explicit confirmation", async () => {
+    await confirmMatch({
+      db: {} as never,
+      venueId: "venue-1",
+      staff: { id: "staff-1", email: "ops@example.com", name: "Ops" },
+      confirmed: true,
+      snapshot: { venueId: "venue-1", providerVenueId: "bt-1", matchedName: "Harbour Cafe", matchedAddress: "18 Queen's Road", matchScore: 1, payload: { weekday: [1] }, expiresAt: new Date("2030-01-01") },
+      now: new Date("2026-07-13T00:00:00Z"),
+    });
+    expect(repo.appendAuditEvent).toHaveBeenCalledWith({}, expect.objectContaining({ actorType: "staff", actorId: "staff-1", action: "venue_match_confirmed", objectType: "venue", objectId: "venue-1" }));
+  });
   it("records explicit confirmation but never auto-activates", async () => {
     const result = await confirmMatch({
       db: {} as never,

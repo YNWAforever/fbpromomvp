@@ -27,4 +27,8 @@ describe("venue match scoring", () => {
     expect(result.nameScore).toBeGreaterThanOrEqual(0.55);
     expect(result.addressScore).toBeGreaterThanOrEqual(0.6);
   });
-});
+
+  it("normalizes trailing legal punctuation deterministically", () => {
+    expect(normalizeVenueText("Cafe Ltd.")).toBe(normalizeVenueText("Cafe"));
+    expect(normalizeVenueText("İSTANBUL CAFE")).toBe("i̇stanbulcafe");
+  });});

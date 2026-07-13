@@ -1,8 +1,9 @@
-﻿import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const repo = vi.hoisted(() => ({
   findVenueById: vi.fn(),
   getLatestForecastSnapshot: vi.fn(),
+  getForecastSnapshotByRequestKey: vi.fn(),
   createForecastSnapshot: vi.fn(),
 }));
 vi.mock("@/db/repositories/venues", () => repo);
@@ -25,6 +26,25 @@ describe("checkVenueCoverage", () => {
     expect(repo.createForecastSnapshot).not.toHaveBeenCalled();
   });
 
+  it("does not persist an available result without a forecast payload", async () => {
+    const provider = {
+      checkCoverage: vi.fn().mockResolvedValue({ available: true, providerVenueId: "bt-1", matchedName: "Harbour Cafe", matchedAddress: "18 Queen's Road" }),
+      getLive: vi.fn(),
+    };
+    const result = await checkVenueCoverage({ db: {} as never, provider, venueId: "venue-1", now: new Date("2026-07-13T00:00:00Z") });
+    expect(result.status).toBe("unavailable");
+    expect(repo.createForecastSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("reuses a snapshot for the same coverage request key", async () => {
+    const snapshot = { id: "snapshot-1", venueId: "venue-1", providerVenueId: "bt-1", matchedName: "Harbour Cafe", matchedAddress: "18 Queen's Road", payload: { weekday: [1] }, fetchedAt: new Date("2026-07-13T00:00:00Z"), expiresAt: new Date("2026-07-20T00:00:00Z"), matchScore: 1 };
+    repo.getForecastSnapshotByRequestKey.mockResolvedValue(snapshot);
+    const provider = { checkCoverage: vi.fn(), getLive: vi.fn() };
+    const result = await checkVenueCoverage({ db: {} as never, provider, venueId: "venue-1", requestKey: "request-1", now: new Date("2026-07-13T00:01:00Z") });
+    expect(result.snapshot).toEqual(snapshot);
+    expect(provider.checkCoverage).not.toHaveBeenCalled();
+    expect(repo.createForecastSnapshot).not.toHaveBeenCalled();
+  });
   it("stores the matched identity and score under the requested venue", async () => {
     const provider = {
       checkCoverage: vi.fn().mockResolvedValue({ available: true, providerVenueId: "bt-1", matchedName: "Harbour Cafe Ltd", matchedAddress: "18 Queen's Road", forecast: { weekday: [1, 2] } }),

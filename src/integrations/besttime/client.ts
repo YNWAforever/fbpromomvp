@@ -4,6 +4,8 @@ import type { BestTimeClientOptions, BestTimeProvider } from "./types";
 
 type JsonRecord = Record<string, unknown>;
 
+const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
+
 function asRecord(value: unknown): JsonRecord {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonRecord) : {};
 }
@@ -34,6 +36,14 @@ function readNumber(body: JsonRecord, ...keys: string[]): number | null {
   return null;
 }
 
+function hasForecastSignal(value: JsonRecord): boolean {
+  return Object.entries(value).some(([key, entry]) => {
+    if (!/(forecast|busyness|coverage|prediction|weekday|hour|day)/i.test(key)) return false;
+    if (typeof entry === "number") return Number.isFinite(entry);
+    if (Array.isArray(entry)) return entry.length > 0;
+    return Boolean(entry && typeof entry === "object" && Object.keys(entry as object).length > 0);
+  });
+}
 function redactedMessage(error: unknown, privateKey?: string, publicKey?: string): string {
   const source = error instanceof Error ? error.message : String(error);
   let message = source;
@@ -56,24 +66,30 @@ export function createBestTimeClient(options: BestTimeClientOptions = {}): BestT
   const publicKey = options.publicKey ?? env.BESTTIME_PUBLIC_KEY;
   const fetchImpl = options.fetch ?? globalThis.fetch;
   const now = options.now ?? (() => new Date());
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   async function post(path: string, body: JsonRecord): Promise<JsonRecord> {
     if (!privateKey) throw new BestTimeProviderError("BestTime credentials unavailable", "credentials_unavailable");
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const response = await fetchImpl(`${baseUrl}${path}`, {
         method: "POST",
         headers: { "content-type": "application/json", accept: "application/json" },
         body: JSON.stringify({ ...body, api_key_private: privateKey, ...(publicKey ? { api_key_public: publicKey } : {}) }),
+        signal: controller.signal,
       });
       if (!response.ok) throw new BestTimeProviderError(`BestTime request failed (${response.status})`, `http_${response.status}`);
       const parsed = await response.json();
       return asRecord(parsed);
     } catch (error) {
+      if (controller.signal.aborted) throw new BestTimeProviderError("BestTime request timed out", "provider_timeout");
       if (error instanceof BestTimeProviderError) throw error;
       throw new BestTimeProviderError(`BestTime request failed: ${redactedMessage(error, privateKey, publicKey)}`);
+    } finally {
+      clearTimeout(timeout);
     }
   }
-
   return {
     async checkCoverage(input) {
       try {
@@ -83,7 +99,7 @@ export function createBestTimeClient(options: BestTimeClientOptions = {}): BestT
         const providerVenueId = readString(venue, "venue_id", "id") ?? readString(body, "venue_id", "id");
         const matchedName = readString(venue, "venue_name", "name") ?? readString(body, "venue_name");
         const matchedAddress = readString(venue, "venue_address", "address") ?? readString(body, "venue_address");
-        const forecast = Object.keys(analysis).length > 0 ? analysis : Object.keys(body).length > 0 ? body : undefined;
+        const forecast = hasForecastSignal(analysis) ? analysis : undefined;
         if (!providerVenueId || !forecast) return { available: false, reason: "no_data" };
         const fetchedAt = now();
         return {
@@ -98,7 +114,7 @@ export function createBestTimeClient(options: BestTimeClientOptions = {}): BestT
           expiresAt: new Date(fetchedAt.getTime() + 7 * 24 * 60 * 60 * 1000),
         } satisfies CoverageResult;
       } catch (error) {
-        if (error instanceof BestTimeProviderError && error.code === "credentials_unavailable") {
+        if (error instanceof BestTimeProviderError && ["credentials_unavailable", "provider_timeout"].includes(error.code)) {
           return { available: false, reason: "provider_error" };
         }
         throw error;
@@ -119,7 +135,7 @@ export function createBestTimeClient(options: BestTimeClientOptions = {}): BestT
         }
         return { observedAt, forecastedBusyness, liveBusyness, delta, status: "ok", providerRequestId } satisfies LiveReading;
       } catch (error) {
-        if (error instanceof BestTimeProviderError && error.code === "credentials_unavailable") {
+        if (error instanceof BestTimeProviderError && ["credentials_unavailable", "provider_timeout"].includes(error.code)) {
           return { observedAt: now(), forecastedBusyness: null, liveBusyness: null, delta: null, status: "unavailable", errorCode: error.code };
         }
         if (error instanceof BestTimeProviderError) throw error;

@@ -1,4 +1,4 @@
-import { getLatestForecastSnapshot, createForecastSnapshot, findVenueById } from "@/db/repositories/venues";
+import { getLatestForecastSnapshot, getForecastSnapshotByRequestKey, createForecastSnapshot, findVenueById } from "@/db/repositories/venues";
 import type { DatabaseExecutor } from "@/db/client";
 import { scoreVenueMatch } from "@/domain/venues/match";
 import type { CoverageResult, VenueMatchScore } from "@/domain/venues/types";
@@ -11,6 +11,7 @@ export type CoverageCheckInput = {
   db: DatabaseExecutor;
   provider: BestTimeProvider;
   venueId: string;
+  requestKey?: string;
   now?: Date;
 };
 
@@ -37,8 +38,9 @@ export async function checkVenueCoverage(input: CoverageCheckInput): Promise<Cov
   const venue = await findVenueById(input.db, input.venueId);
   if (!venue) throw new Error(`venue ${input.venueId} not found`);
 
-  const latest = await getLatestForecastSnapshot(input.db, input.venueId);
-  if (latest && now.getTime() - latest.fetchedAt.getTime() >= 0 && now.getTime() - latest.fetchedAt.getTime() <= FRESH_REUSE_MS) {
+  const latestByRequestKey = input.requestKey ? await getForecastSnapshotByRequestKey(input.db, input.venueId, input.requestKey) : undefined;
+  const latest = latestByRequestKey ?? await getLatestForecastSnapshot(input.db, input.venueId);
+  if (latest && (latest === latestByRequestKey || (now.getTime() - latest.fetchedAt.getTime() >= 0 && now.getTime() - latest.fetchedAt.getTime() <= FRESH_REUSE_MS))) {
     const coverage: CoverageResult = {
       available: Boolean(latest.providerVenueId && latest.payload && Object.keys(latest.payload).length > 0),
       providerVenueId: latest.providerVenueId ?? undefined,
@@ -63,7 +65,7 @@ export async function checkVenueCoverage(input: CoverageCheckInput): Promise<Cov
   } catch {
     return unavailableResult(now, "provider_error");
   }
-  if (!coverage.available || !coverage.providerVenueId || !coverage.matchedName || !coverage.matchedAddress) {
+  if (!coverage.available || !coverage.providerVenueId || !coverage.matchedName || !coverage.matchedAddress || !coverage.forecast || Object.keys(coverage.forecast).length === 0) {
     return unavailableResult(now, coverage.reason ?? "no_data");
   }
 
@@ -74,6 +76,7 @@ export async function checkVenueCoverage(input: CoverageCheckInput): Promise<Cov
   const fetchedAt = coverage.fetchedAt ?? now;
   const expiresAt = coverage.expiresAt ?? new Date(fetchedAt.getTime() + FORECAST_TTL_MS);
   const snapshot = await createForecastSnapshot(input.db, {
+    requestKey: input.requestKey,
     venueId: input.venueId,
     providerVenueId: coverage.providerVenueId,
     matchedName: coverage.matchedName,

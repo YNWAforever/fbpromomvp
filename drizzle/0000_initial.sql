@@ -35,6 +35,7 @@ CREATE TABLE "copy_candidates" (
 --> statement-breakpoint
 CREATE TABLE "forecast_snapshots" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"request_key" text,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"venue_id" uuid NOT NULL,
 	"provider_venue_id" text,
@@ -143,6 +144,7 @@ CREATE TABLE "venue_integrations" (
 --> statement-breakpoint
 CREATE TABLE "venues" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"idempotency_key" text,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"name" text NOT NULL,
 	"address" text NOT NULL,
@@ -170,6 +172,10 @@ CREATE TABLE "weekly_reports" (
 	"state" text NOT NULL,
 	"provider_message_id" text
 );
+--> statement-breakpoint
+CREATE UNIQUE INDEX "forecast_snapshots_venue_request_idx" ON "forecast_snapshots" USING btree ("venue_id","request_key");
+--> statement-breakpoint
+CREATE UNIQUE INDEX "venues_idempotency_key_idx" ON "venues" USING btree ("idempotency_key");
 --> statement-breakpoint
 CREATE UNIQUE INDEX "approvals_trigger_idx" ON "approvals" USING btree ("trigger_id");
 --> statement-breakpoint

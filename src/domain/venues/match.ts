@@ -1,4 +1,4 @@
-﻿import type { VenueIdentity, VenueMatchScore } from "./types";
+import type { VenueIdentity, VenueMatchScore } from "./types";
 
 const LEGAL_SUFFIXES = [
   "limited", "ltd", "llc", "incorporated", "inc", "corporation", "corp", "company", "co",
@@ -24,8 +24,9 @@ function stripLegalSuffixes(value: string): string {
 }
 
 export function normalizeVenueText(value: string): string {
-  const nfkc = value.normalize("NFKC").toLocaleLowerCase().trim();
-  return stripLegalSuffixes(nfkc).replace(/[\p{P}\p{S}\s]+/gu, "");
+  const nfkc = value.normalize("NFKC").toLowerCase().trim();
+  const withoutTrailingPunctuation = nfkc.replace(/[\p{P}\p{S}]+$/gu, "").trim();
+  return stripLegalSuffixes(withoutTrailingPunctuation).replace(/[\p{P}\p{S}\s]+/gu, "");
 }
 
 export function bigramDiceSimilarity(left: string, right: string): number {
