@@ -1,6 +1,8 @@
 import {
   boolean,
+  check,
   doublePrecision,
+  foreignKey,
   integer,
   jsonb,
   pgTable,
@@ -9,6 +11,7 @@ import {
   uuid,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 const id = () => uuid("id").defaultRandom().primaryKey();
 const createdAt = () => timestamp("created_at", { withTimezone: true, mode: "date" }).defaultNow().notNull();
@@ -90,7 +93,10 @@ export const liveReadings = pgTable(
     errorCode: text("error_code"),
     providerRequestId: text("provider_request_id"),
   },
-  (table) => [uniqueIndex("live_readings_venue_observed_at_idx").on(table.venueId, table.observedAt)],
+  (table) => [
+    uniqueIndex("live_readings_venue_observed_at_idx").on(table.venueId, table.observedAt),
+    uniqueIndex("live_readings_venue_id_idx").on(table.venueId, table.id),
+  ],
 );
 
 export const triggers = pgTable(
@@ -104,32 +110,62 @@ export const triggers = pgTable(
     decision: text("decision").notNull(),
     reason: text("reason").notNull(),
   },
+  (table) => [
+    uniqueIndex("triggers_venue_id_idx").on(table.venueId, table.id),
+    foreignKey({
+      columns: [table.venueId, table.liveReadingId],
+      foreignColumns: [liveReadings.venueId, liveReadings.id],
+      name: "triggers_venue_live_reading_fk",
+    }),
+  ],
 );
 
-export const copyCandidates = pgTable("copy_candidates", {
-  id: id(),
-  createdAt: createdAt(),
-  triggerId: uuid("trigger_id").notNull().references(() => triggers.id, { onDelete: "cascade" }),
-  provider: text("provider").notNull(),
-  body: text("body").notNull(),
-  source: text("source").notNull(),
-  valid: boolean("valid").notNull(),
-  validationErrors: jsonb("validation_errors").$type<string[]>().notNull().default([]),
-});
+export const copyCandidates = pgTable(
+  "copy_candidates",
+  {
+    id: id(),
+    createdAt: createdAt(),
+    triggerId: uuid("trigger_id").notNull().references(() => triggers.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    body: text("body").notNull(),
+    source: text("source").notNull(),
+    valid: boolean("valid").notNull(),
+    validationErrors: jsonb("validation_errors").$type<string[]>().notNull().default([]),
+  },
+  (table) => [uniqueIndex("copy_candidates_trigger_id_idx").on(table.triggerId, table.id)],
+);
 
 export const approvals = pgTable(
   "approvals",
   {
     id: id(),
     createdAt: createdAt(),
-    triggerId: uuid("trigger_id").notNull().references(() => triggers.id, { onDelete: "cascade" }),
+    venueId: uuid("venue_id").notNull().references(() => venues.id, { onDelete: "cascade" }),
+    triggerId: uuid("trigger_id").notNull(),
     state: text("state").notNull(),
     selectedCandidateId: uuid("selected_candidate_id").references(() => copyCandidates.id, { onDelete: "set null" }),
     providerMessageId: text("provider_message_id"),
     expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }).notNull(),
     resolvedAt: timestamp("resolved_at", { withTimezone: true, mode: "date" }),
   },
-  (table) => [uniqueIndex("approvals_trigger_idx").on(table.triggerId)],
+  (table) => [
+    uniqueIndex("approvals_trigger_idx").on(table.triggerId),
+    uniqueIndex("approvals_venue_id_idx").on(table.venueId, table.id),
+    foreignKey({
+      columns: [table.venueId, table.triggerId],
+      foreignColumns: [triggers.venueId, triggers.id],
+      name: "approvals_venue_trigger_fk",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.triggerId, table.selectedCandidateId],
+      foreignColumns: [copyCandidates.triggerId, copyCandidates.id],
+      name: "approvals_trigger_candidate_fk",
+    }),
+    check(
+      "approvals_expiry_window_check",
+      sql`${table.expiresAt} > ${table.createdAt} AND ${table.expiresAt} <= ${table.createdAt} + interval '15 minutes'`,
+    ),
+  ],
 );
 
 export const promotions = pgTable(
@@ -138,7 +174,7 @@ export const promotions = pgTable(
     id: id(),
     createdAt: createdAt(),
     venueId: uuid("venue_id").notNull().references(() => venues.id, { onDelete: "cascade" }),
-    approvalId: uuid("approval_id").notNull().references(() => approvals.id, { onDelete: "restrict" }),
+    approvalId: uuid("approval_id").notNull(),
     campaignCode: text("campaign_code").notNull().unique(),
     body: text("body").notNull(),
     state: text("state").notNull(),
@@ -149,7 +185,18 @@ export const promotions = pgTable(
     sentCount: integer("sent_count"),
     acceptedAt: timestamp("accepted_at", { withTimezone: true, mode: "date" }),
   },
-  (table) => [uniqueIndex("promotions_approval_idx").on(table.approvalId)],
+  (table) => [
+    uniqueIndex("promotions_approval_idx").on(table.approvalId),
+    foreignKey({
+      columns: [table.venueId, table.approvalId],
+      foreignColumns: [approvals.venueId, approvals.id],
+      name: "promotions_venue_approval_fk",
+    }).onDelete("restrict"),
+    check(
+      "promotions_valid_window_check",
+      sql`${table.validUntil} > ${table.validFrom} AND ${table.validUntil} <= ${table.validFrom} + interval '2 hours'`,
+    ),
+  ],
 );
 
 export const redemptionReports = pgTable(
@@ -163,7 +210,11 @@ export const redemptionReports = pgTable(
     revision: integer("revision").notNull().default(1),
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
   },
-  (table) => [uniqueIndex("redemption_reports_promotion_idx").on(table.promotionId)],
+  (table) => [
+    uniqueIndex("redemption_reports_promotion_idx").on(table.promotionId),
+    check("redemption_reports_count_check", sql`${table.count} >= 0 AND ${table.count} <= 100000`),
+    check("redemption_reports_revision_check", sql`${table.revision} > 0`),
+  ],
 );
 
 export const weeklyReports = pgTable(

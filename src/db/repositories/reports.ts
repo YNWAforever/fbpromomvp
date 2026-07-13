@@ -5,20 +5,61 @@ import { redemptionReports, weeklyReports } from "../schema";
 export type NewRedemptionReport = typeof redemptionReports.$inferInsert;
 export type NewWeeklyReport = typeof weeklyReports.$inferInsert;
 
+type RedemptionValues = { count: number; note?: string | null; revision?: number };
+type ExistingRedemption = { count: number; note: string | null; revision: number };
+
+export function nextRedemptionRevision(
+  existing: ExistingRedemption | undefined,
+  incoming: RedemptionValues,
+): { changed: boolean; revision: number } {
+  if (!existing) {
+    if (incoming.revision !== undefined && incoming.revision !== 1) {
+      throw new Error("first redemption revision must be 1");
+    }
+    return { changed: true, revision: 1 };
+  }
+
+  const changed = existing.count !== incoming.count || (incoming.note ?? null) !== (existing.note ?? null);
+  if (!changed) return { changed: false, revision: existing.revision };
+
+  const expected = existing.revision + 1;
+  if (incoming.revision !== undefined && incoming.revision !== expected) {
+    throw new Error("revision must advance monotonically");
+  }
+  return { changed: true, revision: expected };
+}
+
 export async function getRedemptionReport(db: DatabaseExecutor, promotionId: string) {
   const [report] = await db.select().from(redemptionReports).where(eq(redemptionReports.promotionId, promotionId)).limit(1);
   return report;
 }
 
 export async function upsertRedemptionReport(db: DatabaseExecutor, values: NewRedemptionReport) {
+  const existing = await getRedemptionReport(db, values.promotionId);
+  const next = nextRedemptionRevision(existing, values);
+  if (existing && !next.changed) return existing;
+
+  const now = new Date();
+  if (!existing) {
+    const [report] = await db
+      .insert(redemptionReports)
+      .values({ ...values, revision: next.revision, updatedAt: values.updatedAt ?? now })
+      .onConflictDoNothing({ target: redemptionReports.promotionId })
+      .returning();
+    if (report) return report;
+    // Another writer inserted the row between the read and insert. Re-read it
+    // and force the caller through the same monotonic guard on the next call.
+    const raced = await getRedemptionReport(db, values.promotionId);
+    if (!raced) throw new Error("redemption report insert lost a concurrent write");
+    return raced;
+  }
+
   const [report] = await db
-    .insert(redemptionReports)
-    .values(values)
-    .onConflictDoUpdate({
-      target: redemptionReports.promotionId,
-      set: { count: values.count, note: values.note, revision: values.revision, updatedAt: values.updatedAt },
-    })
+    .update(redemptionReports)
+    .set({ count: values.count, note: values.note, revision: next.revision, updatedAt: now })
+    .where(and(eq(redemptionReports.id, existing.id), eq(redemptionReports.revision, existing.revision)))
     .returning();
+  if (!report) throw new Error("redemption report changed concurrently; retry with the latest revision");
   return report;
 }
 

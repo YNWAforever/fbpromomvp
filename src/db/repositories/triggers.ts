@@ -1,11 +1,47 @@
-﻿import { desc, eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import type { DatabaseExecutor } from "../client";
 import { approvals, copyCandidates, liveReadings, triggers } from "../schema";
+import { assertSameVenue } from "./ownership";
 
 export type NewLiveReading = typeof liveReadings.$inferInsert;
 export type NewTrigger = typeof triggers.$inferInsert;
 export type NewCopyCandidate = typeof copyCandidates.$inferInsert;
 export type NewApproval = typeof approvals.$inferInsert;
+
+async function assertLiveReadingVenue(db: DatabaseExecutor, venueId: string, liveReadingId: string) {
+  const [reading] = await db
+    .select({ venueId: liveReadings.venueId })
+    .from(liveReadings)
+    .where(eq(liveReadings.id, liveReadingId))
+    .limit(1);
+  if (!reading) throw new Error(`live reading ${liveReadingId} not found`);
+  assertSameVenue("live reading", venueId, reading.venueId);
+}
+
+async function assertApprovalRelations(
+  db: DatabaseExecutor,
+  values: Pick<NewApproval, "venueId" | "triggerId" | "selectedCandidateId">,
+) {
+  const [trigger] = await db
+    .select({ venueId: triggers.venueId })
+    .from(triggers)
+    .where(eq(triggers.id, values.triggerId))
+    .limit(1);
+  if (!trigger) throw new Error(`trigger ${values.triggerId} not found`);
+  assertSameVenue("trigger", values.venueId, trigger.venueId);
+
+  if (values.selectedCandidateId) {
+    const [candidate] = await db
+      .select({ triggerId: copyCandidates.triggerId })
+      .from(copyCandidates)
+      .where(eq(copyCandidates.id, values.selectedCandidateId))
+      .limit(1);
+    if (!candidate) throw new Error(`copy candidate ${values.selectedCandidateId} not found`);
+    if (candidate.triggerId !== values.triggerId) {
+      throw new Error(`copy candidate ${values.selectedCandidateId} must belong to trigger ${values.triggerId}`);
+    }
+  }
+}
 
 export async function createLiveReading(db: DatabaseExecutor, values: NewLiveReading) {
   const [reading] = await db
@@ -41,6 +77,7 @@ export async function listLiveReadings(db: DatabaseExecutor, venueId: string, li
 }
 
 export async function createTrigger(db: DatabaseExecutor, values: NewTrigger) {
+  if (values.liveReadingId) await assertLiveReadingVenue(db, values.venueId, values.liveReadingId);
   const [trigger] = await db
     .insert(triggers)
     .values(values)
@@ -72,6 +109,7 @@ export async function listCopyCandidates(db: DatabaseExecutor, triggerId: string
 }
 
 export async function createApproval(db: DatabaseExecutor, values: NewApproval) {
+  await assertApprovalRelations(db, values);
   const [approval] = await db.insert(approvals).values(values).returning();
   return approval;
 }
@@ -87,10 +125,18 @@ export async function findApprovalByTriggerId(db: DatabaseExecutor, triggerId: s
 }
 
 export async function updateApproval(db: DatabaseExecutor, id: string, values: Partial<NewApproval>) {
+  if (values.venueId || values.triggerId || values.selectedCandidateId) {
+    const existing = await getApproval(db, id);
+    if (!existing) throw new Error(`approval ${id} not found`);
+    await assertApprovalRelations(db, {
+      venueId: values.venueId ?? existing.venueId,
+      triggerId: values.triggerId ?? existing.triggerId,
+      selectedCandidateId: values.selectedCandidateId ?? existing.selectedCandidateId,
+    });
+  }
   const [approval] = await db.update(approvals).set(values).where(eq(approvals.id, id)).returning();
   return approval;
 }
 
 export const insertLiveReading = createLiveReading;
 export const insertTrigger = createTrigger;
-
