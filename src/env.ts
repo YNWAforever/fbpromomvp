@@ -1,3 +1,4 @@
+import { isIP } from "node:net";
 import { z } from "zod";
 
 const optionalNonEmptyString = z.preprocess(
@@ -5,9 +6,16 @@ const optionalNonEmptyString = z.preprocess(
   z.string().trim().min(1).optional(),
 );
 
-const optionalUrl = z.preprocess(
+const optionalHttpUrl = z.preprocess(
   (value) => (value === "" ? undefined : value),
-  z.url().optional(),
+  z.url({ protocol: /^https?$/ }).optional(),
+);
+
+const postgresUrl = z.url({ protocol: /^postgres(ql)?$/ });
+
+const optionalPostgresUrl = z.preprocess(
+  (value) => (value === "" ? undefined : value),
+  postgresUrl.optional(),
 );
 
 const adminEmails = z
@@ -34,11 +42,83 @@ const providerKeys = [
   "OPENCODE_GO_API_KEY",
 ] as const;
 
-const localHosts = new Set(["localhost", "127.0.0.1", "[::1]"]);
+function parseIpv6Groups(hostname: string): number[] | undefined {
+  const compressionIndex = hostname.indexOf("::");
+  const hasCompression = compressionIndex >= 0;
+
+  if (
+    hasCompression &&
+    compressionIndex !== hostname.lastIndexOf("::")
+  ) {
+    return undefined;
+  }
+
+  const sections = hasCompression
+    ? [hostname.slice(0, compressionIndex), hostname.slice(compressionIndex + 2)]
+    : ["", hostname];
+
+  const parseSection = (section: string): number[] | undefined => {
+    if (!section) return [];
+
+    return section.split(":").flatMap((part) => {
+      if (part.includes(".")) {
+        const octets = part.split(".").map(Number);
+        if (
+          octets.length !== 4 ||
+          octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255)
+        ) {
+          return [];
+        }
+        return [(octets[0] << 8) | octets[1], (octets[2] << 8) | octets[3]];
+      }
+
+      if (!/^[0-9a-f]{1,4}$/i.test(part)) return [];
+      return [Number.parseInt(part, 16)];
+    });
+  };
+
+  const left = parseSection(sections[0]);
+  const right = parseSection(sections[1]);
+  if (!left || !right) return undefined;
+
+  const groups = [...left, ...right];
+  if (!hasCompression) return groups.length === 8 ? groups : undefined;
+
+  const zeroCount = 8 - groups.length;
+  if (zeroCount < 1) return undefined;
+
+  return [...left, ...Array.from({ length: zeroCount }, () => 0), ...right];
+}
+
+function isLoopbackIpv6(hostname: string): boolean {
+  const groups = parseIpv6Groups(hostname);
+  if (!groups || groups.length !== 8) return false;
+
+  const isIpv6Loopback = groups.every((group, index) =>
+    index === 7 ? group === 1 : group === 0,
+  );
+  if (isIpv6Loopback) return true;
+
+  const isIpv4Mapped = groups
+    .slice(0, 5)
+    .every((group) => group === 0) && groups[5] === 0xffff;
+  return isIpv4Mapped && (groups[6] >> 8) === 127;
+}
 
 function isLocalhostUrl(value: string) {
   try {
-    return localHosts.has(new URL(value).hostname);
+    const hostname = new URL(value).hostname
+      .toLowerCase()
+      .replace(/^\[/, "")
+      .replace(/\]$/, "")
+      .replace(/\.+$/, "");
+
+    return (
+      hostname === "localhost" ||
+      hostname.endsWith(".localhost") ||
+      (isIP(hostname) === 4 && hostname.split(".")[0] === "127") ||
+      (isIP(hostname) === 6 && isLoopbackIpv6(hostname))
+    );
   } catch {
     return false;
   }
@@ -48,9 +128,9 @@ const serverEnvSchema = z
   .object({
     NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
     VERCEL_ENV: z.enum(["development", "preview", "production"]).optional(),
-    DATABASE_URL: z.url({ protocol: /^postgres(ql)?$/ }),
-    TEST_DATABASE_URL: optionalUrl,
-    MIGRATION_DATABASE_URL: optionalUrl,
+    DATABASE_URL: postgresUrl,
+    TEST_DATABASE_URL: optionalPostgresUrl,
+    MIGRATION_DATABASE_URL: optionalPostgresUrl,
     AUTH_SECRET: z.string().min(32),
     AUTH_GOOGLE_ID: z.string().trim().min(1),
     AUTH_GOOGLE_SECRET: z.string().trim().min(1),
@@ -73,7 +153,7 @@ const serverEnvSchema = z
     OPENCODE_GO_API_KEY: optionalNonEmptyString,
     OPENCODE_GO_MODEL: z.string().trim().min(1).default("deepseek-v4-flash"),
     OPENCODE_GO_BASE_URL: z.url().default("https://opencode.ai/zen/go/v1"),
-    APP_BASE_URL: optionalUrl,
+    APP_BASE_URL: optionalHttpUrl,
   })
   .superRefine((value, context) => {
     const deploymentEnv = value.VERCEL_ENV ?? value.NODE_ENV;

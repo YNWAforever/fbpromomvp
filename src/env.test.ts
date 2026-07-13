@@ -101,6 +101,22 @@ it("rejects localhost app URLs in effective production", () => {
   ).toThrow(/APP_BASE_URL/);
 });
 
+it.each([
+  "http://127.0.0.2:3000",
+  "http://[::1]:3000",
+  "http://[::ffff:127.0.0.1]:3000",
+  "https://dashboard.localhost",
+  "ftp://rescue.example.com",
+])("rejects unsafe production app URL %s", (APP_BASE_URL) => {
+  expect(() =>
+    parseServerEnv({
+      ...baseEnv,
+      ...productionProviders,
+      NODE_ENV: "production",
+      APP_BASE_URL,
+    }),
+  ).toThrow(/APP_BASE_URL/);
+});
 it("accepts a migration-only database URL without replacing the runtime URL", () => {
   const value = parseServerEnv({
     ...baseEnv,
@@ -112,4 +128,31 @@ it("accepts a migration-only database URL without replacing the runtime URL", ()
   expect(value.MIGRATION_DATABASE_URL).toBe(
     "postgresql://migration:secret@example.test/migration",
   );
+});
+
+it.each([
+  ["TEST_DATABASE_URL", "http://bad"],
+  ["TEST_DATABASE_URL", "mysql://bad"],
+  ["MIGRATION_DATABASE_URL", "http://bad"],
+  ["MIGRATION_DATABASE_URL", "mysql://bad"],
+] as const)("rejects non-Postgres %s value %s", (field, value) => {
+  expect(() =>
+    parseServerEnv({
+      ...baseEnv,
+      NODE_ENV: "test",
+      [field]: value,
+    }),
+  ).toThrow(new RegExp(field));
+});
+
+it("treats blank optional database URLs as undefined", () => {
+  const value = parseServerEnv({
+    ...baseEnv,
+    NODE_ENV: "test",
+    TEST_DATABASE_URL: "",
+    MIGRATION_DATABASE_URL: "",
+  });
+
+  expect(value.TEST_DATABASE_URL).toBeUndefined();
+  expect(value.MIGRATION_DATABASE_URL).toBeUndefined();
 });
