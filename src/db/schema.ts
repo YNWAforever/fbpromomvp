@@ -258,4 +258,5 @@ export const auditEvents = pgTable("audit_events", {
   objectType: text("object_type").notNull(),
   objectId: uuid("object_id"),
   metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
-});
+  idempotencyKey: text("idempotency_key"),
+}, (table) => [uniqueIndex("audit_events_idempotency_key_idx").on(table.idempotencyKey)]);

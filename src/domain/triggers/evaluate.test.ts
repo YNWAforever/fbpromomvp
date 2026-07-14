@@ -40,5 +40,15 @@ describe("evaluateTrigger", () => {
     ).toBe("stale_data");
     expect(evaluateTrigger({ ...base, manualReview: true })).toEqual({ decision: "manual_review", reason: "manual_review" });
   });
+
+  it("rejects a preceding reading that is stale, unavailable, or outside the preceding window", () => {
+    const now = new Date("2026-07-14T04:00:00Z");
+    const currentReading = { observedAt: now, status: "ok" as const, delta: -25 };
+    const previousReading = { observedAt: new Date("2026-07-14T03:00:00Z"), status: "ok" as const, delta: -18 };
+    expect(evaluateTrigger({ ...base, now, currentReading, previousReading, previousMaxAgeMs: 90 * 60 * 1000 }).decision).toBe("candidate");
+    expect(evaluateTrigger({ ...base, now, currentReading, previousReading: { ...previousReading, observedAt: new Date("2026-07-12T03:00:00Z") }, previousMaxAgeMs: 90 * 60 * 1000 }).reason).toBe("stale_data");
+    expect(evaluateTrigger({ ...base, now, currentReading, previousReading: { ...previousReading, status: "unavailable" }, previousMaxAgeMs: 90 * 60 * 1000 }).reason).toBe("stale_data");
+    expect(evaluateTrigger({ ...base, now, currentReading, previousReading, previousFresh: false, previousMaxAgeMs: 90 * 60 * 1000 }).reason).toBe("stale_data");
+  });
 });
 

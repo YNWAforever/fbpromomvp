@@ -5,13 +5,11 @@ import { claimJobRun, findJobRunByIdempotencyKey, updateJobRun } from "@/db/repo
 import {
   createLiveReading,
   createTrigger,
+  createTriggerWithStatus,
   findTriggerByIdempotencyKey,
   listLiveReadings,
 } from "@/db/repositories/triggers";
-import {
-  listActiveVenues,
-  listVenueIntegrations,
-} from "@/db/repositories/venues";
+import { listActiveVenues, listVenueIntegrations } from "@/db/repositories/venues";
 import { isWithinBusinessHours, normalizeBusinessHours } from "@/domain/venues/activation";
 import type { TriggerDecision } from "@/domain/triggers/types";
 import { evaluateTrigger } from "@/domain/triggers/evaluate";
@@ -19,6 +17,9 @@ import type { BestTimeProvider } from "@/integrations/besttime/types";
 import type { LiveReading } from "@/domain/venues/types";
 
 const MAX_VENUES_PER_RUN = 25;
+const PREVIOUS_MAX_AGE_MS = 90 * 60 * 1000;
+const PREVIOUS_MIN_GAP_MS = 45 * 60 * 1000;
+const PREVIOUS_MAX_GAP_MS = 90 * 60 * 1000;
 
 export type MonitorResult = {
   processed: number;
@@ -33,9 +34,10 @@ type VenueRow = {
   businessHours?: Record<string, unknown> | null;
   dailyLimit?: number | null;
   weeklyLimit?: number | null;
+  approvalTimeoutMinutes?: number | null;
   triggerDelta?: number | null;
   previousDelta?: number | null;
-  /** Optional denormalized values are useful to callers with a policy view. */
+  /** Optional denormalized values are retained only for non-route callers/tests. */
   acceptedToday?: number;
   acceptedThisWeek?: number;
   hasPendingPromotion?: boolean;
@@ -56,6 +58,15 @@ export type MonitorVenuesInput = {
   getAcceptedCounts?: (db: DatabaseExecutor, venue: VenueRow, now: Date) => Promise<{ today: number; week: number }>;
   hasPendingPromotion?: (db: DatabaseExecutor, venue: VenueRow, now: Date) => Promise<boolean>;
 };
+
+export class JobInProgressError extends Error {
+  readonly code = "JOB_IN_PROGRESS" as const;
+
+  constructor(idempotencyKey: string) {
+    super(`job ${idempotencyKey} is already running`);
+    this.name = "JobInProgressError";
+  }
+}
 
 function jobKey(input: MonitorVenuesInput, now: Date): string {
   return input.idempotencyKey ?? `hourly:${input.runId ?? DateTime.fromJSDate(now).startOf("hour").toUTC().toISO()}`;
@@ -84,28 +95,44 @@ function storedResult(value: unknown): MonitorResult | undefined {
   };
 }
 
+function isAdjacentPreviousReading(previous: Pick<LiveReading, "observedAt" | "status" | "delta"> | undefined, current: Date) {
+  if (!previous || previous.status !== "ok" || previous.delta === null) return false;
+  const observedAt = previous.observedAt instanceof Date ? previous.observedAt.getTime() : Number.NaN;
+  const gap = current.getTime() - observedAt;
+  return Number.isFinite(gap) && gap >= PREVIOUS_MIN_GAP_MS && gap <= PREVIOUS_MAX_GAP_MS;
+}
+
 /**
  * Fetch and persist one fresh BestTime reading for up to 25 active venues,
  * evaluate the pure policy, and dispatch only candidate triggers.
  */
 export async function monitorVenues(input: MonitorVenuesInput): Promise<MonitorResult> {
+  if (!input.candidateDispatcher) throw new Error("candidate dispatcher is required");
+
   const now = input.now ?? new Date();
   const idempotencyKey = jobKey(input, now);
   const existing = await findJobRunByIdempotencyKey(input.db, idempotencyKey);
   const existingResult = storedResult(existing?.result);
   if (existingResult) return existingResult;
-  const run = await claimJobRun(input.db, {
+
+  const claimed = await claimJobRun(input.db, {
     kind: "monitor_venues",
     idempotencyKey,
     state: "running",
     attempts: (existing?.attempts ?? 0) + 1,
   });
+  const run = "run" in (claimed as object) ? claimed.run : (claimed as typeof claimed & { id?: string });
+  const ownsRun = "claimed" in (claimed as object) ? claimed.claimed : true;
+  if (!ownsRun) throw new JobInProgressError(idempotencyKey);
+  if (!run?.id) throw new Error(`job ${idempotencyKey} was not persisted`);
+
   const result: MonitorResult = { processed: 0, candidates: 0, suppressed: 0, failures: 0 };
   try {
-    const allVenues = (await listActiveVenues(input.db)) as unknown as VenueRow[];
+    const maxVenues = Math.min(input.maxVenues ?? MAX_VENUES_PER_RUN, MAX_VENUES_PER_RUN);
+    const allVenues = (await listActiveVenues(input.db, maxVenues)) as unknown as VenueRow[];
     const venues = allVenues
       .filter((venue) => !input.tenantId || !venue.tenantId || venue.tenantId === input.tenantId)
-      .slice(0, Math.min(input.maxVenues ?? MAX_VENUES_PER_RUN, MAX_VENUES_PER_RUN));
+      .slice(0, maxVenues);
 
     for (const venue of venues) {
       result.processed += 1;
@@ -113,7 +140,7 @@ export async function monitorVenues(input: MonitorVenuesInput): Promise<MonitorR
         const integrations = await listVenueIntegrations(input.db, venue.id);
         const bestTime = integrations.find((integration) => integration.provider === "besttime");
         const providerVenueId = venue.providerVenueId ?? bestTime?.externalId ?? undefined;
-        const previous = (await listLiveReadings(input.db, venue.id, 2))[0];
+        const previous = (await listLiveReadings(input.db, venue.id, 2))[0] as LiveReading | undefined;
         let reading: LiveReading;
         if (!providerVenueId) {
           reading = unavailableReading(now, "credentials_unavailable");
@@ -144,6 +171,7 @@ export async function monitorVenues(input: MonitorVenuesInput): Promise<MonitorR
         const hasPending = input.hasPendingPromotion
           ? await input.hasPendingPromotion(input.db, venue, now)
           : Boolean(venue.hasPendingPromotion);
+        const previousFresh = isAdjacentPreviousReading(previous, observedAt);
         const decision: TriggerDecision = evaluateTrigger({
           active: true,
           insideBusinessHours,
@@ -157,31 +185,51 @@ export async function monitorVenues(input: MonitorVenuesInput): Promise<MonitorR
           threshold: venue.triggerDelta ?? undefined,
           previousThreshold: venue.previousDelta ?? undefined,
           currentReading: { observedAt, status: reading.status, delta: reading.delta },
-          // The preceding scheduled reading is intentionally not age-checked:
-          // hourly scans naturally observe it roughly one hour in the past.
+          previousReading: previous ? { observedAt: previous.observedAt, status: previous.status, delta: previous.delta } : undefined,
+          previousFresh,
+          previousMaxAgeMs: PREVIOUS_MAX_AGE_MS,
           currentFresh: reading.status === "ok",
           now,
         });
         const triggerKey = buildTriggerIdempotencyKey(venue.id, now, timezone);
         const existingTrigger = await findTriggerByIdempotencyKey(input.db, triggerKey);
-        const trigger = existingTrigger ?? (await createTrigger(input.db, {
-          venueId: venue.id,
-          liveReadingId: persistedReading?.id,
-          idempotencyKey: triggerKey,
-          decision: decision.decision,
-          reason: decision.reason,
-        }));
+        const triggerResult = existingTrigger
+          ? { trigger: existingTrigger, created: false }
+          : typeof createTriggerWithStatus === "function"
+            ? await createTriggerWithStatus(input.db, {
+                venueId: venue.id,
+                liveReadingId: persistedReading?.id,
+                idempotencyKey: triggerKey,
+                decision: decision.decision,
+                reason: decision.reason,
+              })
+            : {
+                trigger: await createTrigger(input.db, {
+                  venueId: venue.id,
+                  liveReadingId: persistedReading?.id,
+                  idempotencyKey: triggerKey,
+                  decision: decision.decision,
+                  reason: decision.reason,
+                }),
+                created: true,
+              };
+        const trigger = triggerResult.trigger;
         if (!trigger) throw new Error(`trigger ${triggerKey} was not persisted`);
-        await appendAuditEvent(input.db, {
-          actorType: "system",
-          action: "trigger_evaluated",
-          objectType: "trigger",
-          objectId: trigger.id,
-          metadata: { venueId: venue.id, decision: decision.decision, reason: decision.reason, idempotencyKey: triggerKey },
-        });
+        if (triggerResult.created) {
+          await appendAuditEvent(input.db, {
+            actorType: "system",
+            action: "trigger_evaluated",
+            objectType: "trigger",
+            objectId: trigger.id,
+            idempotencyKey: `${triggerKey}:trigger_evaluated`,
+            metadata: { venueId: venue.id, decision: decision.decision, reason: decision.reason, idempotencyKey: triggerKey },
+          });
+        }
         if (decision.decision === "candidate") {
+          if (triggerResult.created) {
+            await input.candidateDispatcher(trigger.id, venue);
+          }
           result.candidates += 1;
-          if (input.candidateDispatcher && !existingTrigger) await input.candidateDispatcher(trigger.id, venue);
         } else {
           result.suppressed += 1;
         }
@@ -189,11 +237,10 @@ export async function monitorVenues(input: MonitorVenuesInput): Promise<MonitorR
         result.failures += 1;
       }
     }
-    if (run?.id) await updateJobRun(input.db, run.id, { state: "completed", result, completedAt: now });
+    await updateJobRun(input.db, run.id, { state: "completed", result, completedAt: now });
     return result;
   } catch (error) {
-    if (run?.id) await updateJobRun(input.db, run.id, { state: "failed", result, completedAt: now });
+    await updateJobRun(input.db, run.id, { state: "failed", result, completedAt: now });
     throw error;
   }
 }
-

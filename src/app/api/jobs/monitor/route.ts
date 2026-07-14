@@ -4,9 +4,28 @@ import { env } from "@/env";
 import { monitorVenues } from "@/application/triggers/monitor-venues";
 import { createBestTimeClient } from "@/integrations/besttime/client";
 import { verifyHmacRequest } from "@/lib/security/hmac";
+import { createApproval } from "@/db/repositories/triggers";
+import { getAcceptedPromotionCounts, hasPendingPromotion as hasPendingPromotionInWindow } from "@/db/repositories/promotions";
+
+type CandidateVenue = {
+  id: string;
+  timezone?: string | null;
+  approvalTimeoutMinutes?: number | null;
+};
 
 function errorResponse(message: string, status: number) {
   return NextResponse.json({ error: message }, { status });
+}
+
+async function dispatchCandidate(db: Parameters<typeof createApproval>[0], triggerId: string, venue: CandidateVenue, now: Date) {
+  const timeoutMinutes = Math.max(1, Math.min(venue.approvalTimeoutMinutes ?? 15, 15));
+  const approval = await createApproval(db, {
+    venueId: venue.id,
+    triggerId,
+    state: "pending",
+    expiresAt: new Date(now.getTime() + timeoutMinutes * 60 * 1000),
+  });
+  if (!approval) throw new Error(`approval for trigger ${triggerId} was not persisted`);
 }
 
 export async function POST(request: Request) {
@@ -23,16 +42,19 @@ export async function POST(request: Request) {
   if (typeof body.runId !== "string" || !body.runId.trim() || typeof body.scheduledAt !== "string" || Number.isNaN(Date.parse(body.scheduledAt))) {
     return errorResponse("runId and scheduledAt are required", 400);
   }
+  const now = new Date(body.scheduledAt as string);
   try {
     const result = await withDatabase((db) => monitorVenues({
       db,
       provider: createBestTimeClient(),
       runId: body.runId as string,
       idempotencyKey: idempotencyKey.trim(),
-      now: new Date(body.scheduledAt as string),
+      now,
       tenantId: typeof body.tenantId === "string" && body.tenantId.trim() ? body.tenantId.trim() : undefined,
+      getAcceptedCounts: (executor, venue, instant) => getAcceptedPromotionCounts(executor, venue.id, instant, venue.timezone ?? "Asia/Hong_Kong"),
+      hasPendingPromotion: (executor, venue, instant) => hasPendingPromotionInWindow(executor, venue.id, instant),
+      candidateDispatcher: (triggerId, venue) => dispatchCandidate(db, triggerId, venue, now),
     }));
     return NextResponse.json(result, { status: 200 });
   } catch { return errorResponse("monitor job failed", 500); }
 }
-

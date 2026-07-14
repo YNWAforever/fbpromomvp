@@ -15,6 +15,13 @@
       "when": 1783990822798,
       "tag": "0001_sparkling_callisto",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1784026452727,
+      "tag": "0002_burly_maverick",
+      "breakpoints": true
     }
   ]
 }

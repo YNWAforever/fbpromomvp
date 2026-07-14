@@ -32,8 +32,8 @@ export async function getVenue(db: DatabaseExecutor, id: string) {
   return venue;
 }
 
-export async function listActiveVenues(db: DatabaseExecutor) {
-  return db.select().from(venues).where(eq(venues.status, "active")).orderBy(venues.name);
+export async function listActiveVenues(db: DatabaseExecutor, limit = 25) {
+  return db.select().from(venues).where(eq(venues.status, "active")).orderBy(venues.name).limit(limit);
 }
 
 export async function getVenueByIdempotencyKey(db: DatabaseExecutor, idempotencyKey: string) {

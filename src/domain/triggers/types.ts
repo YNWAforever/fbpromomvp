@@ -43,6 +43,8 @@ export type TriggerEvaluationInput = {
   /** Optional precomputed flags are useful when the caller owns a clock/timezone. */
   currentFresh?: boolean;
   previousFresh?: boolean;
+  /** Hourly debounce readings may be older than the current provider sample. */
+  previousMaxAgeMs?: number;
   /** A venue with a pending identity/configuration review cannot be offered automatically. */
   manualReview?: boolean;
   timezone?: string;

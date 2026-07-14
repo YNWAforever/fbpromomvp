@@ -76,6 +76,17 @@ export async function listLiveReadings(db: DatabaseExecutor, venueId: string, li
     .limit(limit);
 }
 
+export async function createTriggerWithStatus(db: DatabaseExecutor, values: NewTrigger) {
+  if (values.liveReadingId) await assertLiveReadingVenue(db, values.venueId, values.liveReadingId);
+  const [trigger] = await db
+    .insert(triggers)
+    .values(values)
+    .onConflictDoNothing({ target: triggers.idempotencyKey })
+    .returning();
+  if (trigger) return { trigger, created: true };
+  const existing = await findTriggerByIdempotencyKey(db, values.idempotencyKey);
+  return { trigger: existing, created: false };
+}
 export async function createTrigger(db: DatabaseExecutor, values: NewTrigger) {
   if (values.liveReadingId) await assertLiveReadingVenue(db, values.venueId, values.liveReadingId);
   const [trigger] = await db

@@ -4,6 +4,7 @@ import type { TriggerDecision, TriggerEvaluationInput } from "./types";
 const DEFAULT_THRESHOLD = -20;
 const DEFAULT_PREVIOUS_THRESHOLD = -15;
 const DEFAULT_MAX_AGE_MS = 5 * 60 * 1000;
+const DEFAULT_PREVIOUS_MAX_AGE_MS = 90 * 60 * 1000;
 
 function skip(reason: TriggerDecision["reason"]): TriggerDecision {
   return { decision: "skip", reason };
@@ -34,9 +35,10 @@ export function evaluateTrigger(input: TriggerEvaluationInput): TriggerDecision 
 
   const now = input.now ?? new Date();
   const maxAgeMs = input.maxAgeMs ?? DEFAULT_MAX_AGE_MS;
+  const previousMaxAgeMs = input.previousMaxAgeMs ?? DEFAULT_PREVIOUS_MAX_AGE_MS;
   if (input.currentFresh === false || input.previousFresh === false) return skip("stale_data");
   if (input.currentReading && !isLiveReadingFresh(input.currentReading, now, maxAgeMs)) return skip("stale_data");
-  if (input.previousReading && !isLiveReadingFresh(input.previousReading, now, maxAgeMs)) return skip("stale_data");
+  if (input.previousReading && !isLiveReadingFresh(input.previousReading, now, previousMaxAgeMs)) return skip("stale_data");
 
   if (!Number.isFinite(currentDelta) || !Number.isFinite(previousDelta)) return skip("missing_data");
   const threshold = input.threshold ?? DEFAULT_THRESHOLD;

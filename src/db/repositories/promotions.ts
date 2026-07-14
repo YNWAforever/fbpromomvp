@@ -1,4 +1,5 @@
-import { and, desc, eq, gte, lte } from "drizzle-orm";
+import { and, count, desc, eq, gte, gt, inArray, lte, or } from "drizzle-orm";
+import { DateTime } from "luxon";
 import type { DatabaseExecutor } from "../client";
 import { approvals, promotions } from "../schema";
 import { assertSameVenue } from "./ownership";
@@ -58,6 +59,66 @@ export async function listAcceptedPromotions(db: DatabaseExecutor, venueId: stri
       ),
     )
     .orderBy(desc(promotions.acceptedAt));
+}
+
+/** Count accepted promotions in the venue-local day and Monday-based week. */
+export async function getAcceptedPromotionCounts(db: DatabaseExecutor, venueId: string, now: Date, timezone = "Asia/Hong_Kong") {
+  const local = DateTime.fromJSDate(now, { zone: timezone });
+  const dayStart = local.startOf("day").toUTC().toJSDate();
+  const weekStart = local.startOf("week").toUTC().toJSDate();
+  const [row] = await db
+    .select({ count: count() })
+    .from(promotions)
+    .where(
+      and(
+        eq(promotions.venueId, venueId),
+        eq(promotions.state, "accepted"),
+        gte(promotions.acceptedAt, weekStart),
+        lte(promotions.acceptedAt, now),
+      ),
+    );
+  const week = Number(row?.count ?? 0);
+  const dayRows = await db
+    .select({ count: count() })
+    .from(promotions)
+    .where(
+      and(
+        eq(promotions.venueId, venueId),
+        eq(promotions.state, "accepted"),
+        gte(promotions.acceptedAt, dayStart),
+        lte(promotions.acceptedAt, now),
+      ),
+    );
+  return { today: Number(dayRows[0]?.count ?? 0), week };
+}
+
+/** True while an approval or currently valid promotion occupies the venue. */
+export async function hasPendingPromotion(db: DatabaseExecutor, venueId: string, now: Date) {
+  const [pendingApproval] = await db
+    .select({ id: approvals.id })
+    .from(approvals)
+    .where(and(eq(approvals.venueId, venueId), eq(approvals.state, "pending"), gt(approvals.expiresAt, now)))
+    .limit(1);
+  if (pendingApproval) return true;
+
+  const [activePromotion] = await db
+    .select({ id: promotions.id })
+    .from(promotions)
+    .where(
+      and(
+        eq(promotions.venueId, venueId),
+        or(
+          eq(promotions.state, "pending"),
+          and(
+            inArray(promotions.state, ["active", "accepted"]),
+            lte(promotions.validFrom, now),
+            gte(promotions.validUntil, now),
+          ),
+        ),
+      ),
+    )
+    .limit(1);
+  return Boolean(activePromotion);
 }
 
 export const findPromotionById = getPromotion;
