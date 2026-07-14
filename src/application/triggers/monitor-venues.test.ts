@@ -133,4 +133,36 @@ describe("monitorVenues reliability boundaries", () => {
       expect(result.suppressed).toBe(1);
     }
   });
+  it("reclaims a failed job even when it has a partial result", async () => {
+    repositories.findJobRunByIdempotencyKey.mockResolvedValue({
+      id: "job-1",
+      state: "failed",
+      attempts: 1,
+      result: { processed: 1, candidates: 0, suppressed: 0, failures: 1 },
+    });
+    repositories.claimJobRun.mockResolvedValue({ run: { id: "job-1", state: "running" }, claimed: true });
+    const provider = { getLive: vi.fn().mockResolvedValue({ observedAt: now, forecastedBusyness: 60, liveBusyness: 35, delta: -25, status: "ok" }), checkCoverage: vi.fn() };
+    const candidateDispatcher = vi.fn().mockResolvedValue(undefined);
+
+    const result = await monitorVenues({
+      db: {} as never,
+      provider,
+      idempotencyKey: "job-1",
+      now,
+      candidateDispatcher,
+      getAcceptedCounts: vi.fn().mockResolvedValue({ today: 0, week: 0 }),
+      hasPendingPromotion: vi.fn().mockResolvedValue(false),
+    });
+
+    expect(repositories.claimJobRun).toHaveBeenCalledWith({}, {
+      kind: "monitor_venues",
+      idempotencyKey: "job-1",
+      state: "running",
+      attempts: 2,
+    });
+    expect(provider.getLive).toHaveBeenCalledWith("best-1");
+    expect(candidateDispatcher).toHaveBeenCalledWith("trigger-1", expect.objectContaining({ id: "venue-1" }));
+    expect(result).toEqual({ processed: 1, candidates: 1, suppressed: 0, failures: 0 });
+
+  });
 });

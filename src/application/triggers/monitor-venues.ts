@@ -113,7 +113,7 @@ export async function monitorVenues(input: MonitorVenuesInput): Promise<MonitorR
   const idempotencyKey = jobKey(input, now);
   const existing = await findJobRunByIdempotencyKey(input.db, idempotencyKey);
   const existingResult = storedResult(existing?.result);
-  if (existingResult) return existingResult;
+  if (existing?.state === "completed" && existingResult) return existingResult;
 
   const claimed = await claimJobRun(input.db, {
     kind: "monitor_venues",
