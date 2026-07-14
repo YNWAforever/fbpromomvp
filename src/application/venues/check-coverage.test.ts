@@ -26,7 +26,12 @@ describe("checkVenueCoverage", () => {
     expect(repo.createForecastSnapshot).not.toHaveBeenCalled();
   });
 
-  it("does not persist an available result without a forecast payload", async () => {
+  it("surfaces a provider timeout as an unavailable reason", async () => {
+    const provider = { checkCoverage: vi.fn().mockResolvedValue({ available: false, reason: "provider_timeout" as const }), getLive: vi.fn() };
+    const result = await checkVenueCoverage({ db: {} as never, provider, venueId: "venue-1", now: new Date("2026-07-13T00:00:00Z") });
+    expect(result).toMatchObject({ status: "unavailable", notApplicable: true, reason: "provider_timeout" });
+    expect(result.coverage.reason).toBe("provider_timeout");
+  });  it("does not persist an available result without a forecast payload", async () => {
     const provider = {
       checkCoverage: vi.fn().mockResolvedValue({ available: true, providerVenueId: "bt-1", matchedName: "Harbour Cafe", matchedAddress: "18 Queen's Road" }),
       getLive: vi.fn(),

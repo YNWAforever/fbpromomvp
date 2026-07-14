@@ -7,6 +7,8 @@ import type { BestTimeProvider } from "@/integrations/besttime/types";
 const FORECAST_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const FRESH_REUSE_MS = 5 * 60 * 1000;
 
+type CoverageReason = NonNullable<CoverageResult["reason"]>;
+
 export type CoverageCheckInput = {
   db: DatabaseExecutor;
   provider: BestTimeProvider;
@@ -21,11 +23,13 @@ export type CoverageCheckResult = {
   snapshot?: Awaited<ReturnType<typeof createForecastSnapshot>>;
   status: "available" | "unavailable" | "needs_match_review" | "blocked";
   notApplicable: boolean;
+  reason?: CoverageReason;
 };
 
-function unavailableResult(now: Date, reason: "no_data" | "provider_error"): CoverageCheckResult {
+function unavailableResult(now: Date, reason: CoverageReason): CoverageCheckResult {
   return {
     coverage: { available: false, reason, fetchedAt: now },
+    reason,
     match: { decision: "blocked", totalScore: 0, nameScore: 0, addressScore: 0, normalizedSubmitted: { name: "", address: "" }, normalizedProvider: { name: "", address: "" } },
     status: "unavailable",
     notApplicable: true,
@@ -96,4 +100,3 @@ export async function checkVenueCoverage(input: CoverageCheckInput): Promise<Cov
 }
 
 export const checkCoverage = checkVenueCoverage;
-

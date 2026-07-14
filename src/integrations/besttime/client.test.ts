@@ -98,7 +98,7 @@ describe("BestTime adapter", () => {
       const client = createBestTimeClient({ baseUrl: "https://besttime.test/api/v1", privateKey: "private-secret", timeoutMs: 1_000, fetch: fetchMock });
       const pending = client.checkCoverage({ name: "Harbour Cafe", address: "18 Queen's Road" });
       await vi.advanceTimersByTimeAsync(1_000);
-      await expect(pending).resolves.toMatchObject({ available: false, reason: "provider_error" });
+      await expect(pending).resolves.toMatchObject({ available: false, reason: "provider_timeout" });
     } finally {
       vi.useRealTimers();
     }

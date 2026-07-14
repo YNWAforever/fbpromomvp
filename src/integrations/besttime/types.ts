@@ -16,4 +16,3 @@ export type BestTimeClientOptions = {
   /** Maximum time allowed for a provider request before it is aborted. */
   timeoutMs?: number;
 };
-

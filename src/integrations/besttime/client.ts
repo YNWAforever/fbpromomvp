@@ -115,7 +115,7 @@ export function createBestTimeClient(options: BestTimeClientOptions = {}): BestT
         } satisfies CoverageResult;
       } catch (error) {
         if (error instanceof BestTimeProviderError && ["credentials_unavailable", "provider_timeout"].includes(error.code)) {
-          return { available: false, reason: "provider_error" };
+          return { available: false, reason: error.code === "provider_timeout" ? "provider_timeout" : "credentials_unavailable" };
         }
         throw error;
       }
@@ -146,4 +146,3 @@ export function createBestTimeClient(options: BestTimeClientOptions = {}): BestT
 }
 
 export const createBestTimeProvider = createBestTimeClient;
-

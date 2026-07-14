@@ -3,7 +3,8 @@
 import { useActionState, useState } from "react";
 import { checkVenueCoverageFormAction, confirmVenueMatchFormAction, createDraftVenueFormAction } from "./actions";
 
-type CoverageState = { available?: boolean; providerVenueId?: string; matchedName?: string; matchedAddress?: string; forecast?: Record<string, unknown>; fetchedAt?: string | Date };
+type CoverageReason = "no_data" | "provider_error" | "provider_timeout" | "credentials_unavailable";
+type CoverageState = { available?: boolean; providerVenueId?: string; matchedName?: string; matchedAddress?: string; forecast?: Record<string, unknown>; reason?: CoverageReason; fetchedAt?: string | Date };
 type MatchState = { totalScore?: number; nameScore?: number; addressScore?: number; decision?: string };
 type ActivationState = { blockers?: string[]; allowed?: boolean };
 type ActionState = {
@@ -13,10 +14,26 @@ type ActionState = {
   submitted?: { name?: string; address?: string };
   coverage?: CoverageState;
   match?: MatchState;
+  status?: "available" | "unavailable" | "needs_match_review" | "blocked";
+  notApplicable?: boolean;
+  reason?: CoverageReason;
   activation?: ActivationState;
 };
 
 const initialState: ActionState = { ok: false };
+
+function unavailableMessage(reason?: CoverageReason): string {
+  switch (reason) {
+    case "provider_timeout":
+      return "BestTime timed out before returning a forecast.";
+    case "credentials_unavailable":
+      return "BestTime credentials are unavailable.";
+    case "provider_error":
+      return "BestTime is temporarily unavailable.";
+    default:
+      return "BestTime did not return coverage data for this venue.";
+  }
+}
 
 export default function VenueOnboarding() {
   const [createState, createAction, createPending] = useActionState<ActionState, FormData>(async (_previous, formData) => (await createDraftVenueFormAction(formData)) as ActionState, initialState);
@@ -28,6 +45,10 @@ export default function VenueOnboarding() {
   const coverage = coverageState.coverage;
   const match = coverageState.match;
   const activation = confirmState.activation;
+  const status = coverageState.status;
+  const notApplicable = coverageState.notApplicable === true || status === "unavailable";
+  const coverageReason = coverageState.reason ?? coverage?.reason;
+  const blockedMatch = status === "blocked" || match?.decision === "blocked";
 
   return (
     <div className="max-w-4xl">
@@ -63,7 +84,20 @@ export default function VenueOnboarding() {
             </div>
             <div className="rounded-xl border border-amber-400/30 bg-amber-400/5 p-5">
               <h2 className="text-sm font-semibold text-amber-100">BestTime match</h2>
-              {coverage ? <><p className="mt-3 text-sm text-amber-100">{coverage.matchedName} — {coverage.matchedAddress}</p><p className="mt-2 text-xs text-amber-200">Provider venue: {coverage.providerVenueId ?? "Unavailable"}</p><p className="mt-2 text-xs text-amber-200">Score: {typeof match?.totalScore === "number" ? match.totalScore.toFixed(3) : "—"} ({match?.decision ?? "unavailable"})</p><p className="mt-2 text-xs text-slate-400">Forecast: {coverage.forecast ? "available" : "unavailable"}</p></> : <p className="mt-3 text-sm text-amber-100/70">Run a coverage check to see the provider identity and score.</p>}
+              {notApplicable ? (
+                <div className="mt-3 space-y-2" role="status" aria-live="polite">
+                  <p className="text-sm font-semibold text-amber-100">Not applicable</p>
+                  <p className="text-sm text-amber-100/90">{unavailableMessage(coverageReason)}</p>
+                  <p className="text-xs text-amber-200">No provider venue or forecast is available. Confirmation and activation remain disabled.</p>
+                </div>
+              ) : coverage ? (
+                <>
+                  <p className="mt-3 text-sm text-amber-100">{coverage.matchedName} — {coverage.matchedAddress}</p>
+                  <p className="mt-2 text-xs text-amber-200">Provider venue: {coverage.providerVenueId ?? "Unavailable"}</p>
+                  <p className="mt-2 text-xs text-amber-200">Score: {typeof match?.totalScore === "number" ? match.totalScore.toFixed(3) : "—"} ({match?.decision ?? "unavailable"})</p>
+                  <p className="mt-2 text-xs text-slate-400">Forecast: {coverage.forecast ? "available" : "unavailable"}</p>
+                </>
+              ) : <p className="mt-3 text-sm text-amber-100/70">Run a coverage check to see the provider identity and score.</p>}
             </div>
           </div>
 
@@ -73,9 +107,10 @@ export default function VenueOnboarding() {
             {coverageState.error && <p className="text-sm text-rose-300">{coverageState.error}</p>}
           </form>
 
-          {coverage?.available && <form action={confirmAction} className="mt-5 rounded-xl border border-cyan-400/30 bg-cyan-400/5 p-5"><input type="hidden" name="venueId" value={venueId} /><input type="hidden" name="confirmed" value="true" /><button type="submit" disabled={confirmPending} className="rounded-lg bg-cyan-300 px-4 py-2 text-sm font-semibold text-slate-950 disabled:opacity-50">{confirmPending ? "Confirming…" : "Confirm match"}</button>{confirmState.error && <p className="mt-3 text-sm text-rose-300">{confirmState.error}</p>}</form>}
+          {coverage?.available && !notApplicable && !blockedMatch && <form action={confirmAction} className="mt-5 rounded-xl border border-cyan-400/30 bg-cyan-400/5 p-5"><input type="hidden" name="venueId" value={venueId} /><input type="hidden" name="confirmed" value="true" /><button type="submit" disabled={confirmPending} className="rounded-lg bg-cyan-300 px-4 py-2 text-sm font-semibold text-slate-950 disabled:opacity-50">{confirmPending ? "Confirming…" : "Confirm match"}</button>{confirmState.error && <p className="mt-3 text-sm text-rose-300">{confirmState.error}</p>}</form>}
+          {coverage?.available && blockedMatch && <p className="mt-5 rounded-xl border border-rose-400/30 bg-rose-400/5 p-5 text-sm text-rose-200" role="status">Blocked match — manual review is required before confirmation.</p>}
 
-          <section className="mt-6 rounded-xl border border-slate-800 bg-slate-900/70 p-5"><h2 className="text-sm font-semibold text-white">Activation checklist</h2><p className="mt-3 text-sm text-slate-400">Forecast, confirmed match, business hours, WozTell owner/channel/audience metadata, and an active offer template are required.</p>{activation && <p className="mt-3 text-xs font-medium uppercase tracking-wide text-amber-200">{activation.allowed ? "Ready for activation" : `Blocked by: ${(activation.blockers ?? []).join(", ") || "review"}`}</p>}</section>
+          <section className="mt-6 rounded-xl border border-slate-800 bg-slate-900/70 p-5"><h2 className="text-sm font-semibold text-white">Activation checklist</h2><p className="mt-3 text-sm text-slate-400">Forecast, confirmed match, business hours, WozTell owner/channel/audience metadata, and an active offer template are required.</p>{notApplicable && <p className="mt-3 text-xs font-medium uppercase tracking-wide text-amber-200">Not applicable — resolve BestTime coverage before activation.</p>}{blockedMatch && !notApplicable && <p className="mt-3 text-xs font-medium uppercase tracking-wide text-rose-200">Blocked — manual match review required.</p>}{activation && <p className="mt-3 text-xs font-medium uppercase tracking-wide text-amber-200">{activation.allowed ? "Ready for activation" : `Blocked by: ${(activation.blockers ?? []).join(", ") || "review"}`}</p>}</section>
         </>
       )}
     </div>

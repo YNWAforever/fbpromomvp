@@ -20,7 +20,7 @@ export type CoverageResult = {
   matchedName?: string;
   matchedAddress?: string;
   forecast?: Record<string, unknown>;
-  reason?: "no_data" | "provider_error";
+  reason?: "no_data" | "provider_error" | "provider_timeout" | "credentials_unavailable";
   fetchedAt?: Date;
   expiresAt?: Date;
 };
@@ -41,4 +41,3 @@ export type CoverageWindow = {
 };
 
 export type NormalizedBusinessHours = Record<string, CoverageWindow[]>;
-

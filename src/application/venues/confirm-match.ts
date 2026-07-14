@@ -88,4 +88,3 @@ export async function confirmMatch(input: ConfirmMatchInput): Promise<ConfirmMat
 }
 
 export const confirmVenueMatch = confirmMatch;
-
