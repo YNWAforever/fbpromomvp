@@ -36,6 +36,11 @@ export async function findPromotionByApprovalId(db: DatabaseExecutor, approvalId
   return promotion;
 }
 
+/** Update only when a sender still owns the expected state. */
+export async function updatePromotionIfState(db: DatabaseExecutor, id: string, expectedState: string, values: Partial<NewPromotion>) {
+  const [promotion] = await db.update(promotions).set(values).where(and(eq(promotions.id, id), eq(promotions.state, expectedState))).returning();
+  return promotion;
+}
 export async function updatePromotion(db: DatabaseExecutor, id: string, values: Partial<NewPromotion>) {
   if (values.venueId || values.approvalId) {
     const existing = await getPromotion(db, id);

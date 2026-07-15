@@ -132,9 +132,21 @@ export async function getApproval(db: DatabaseExecutor, id: string) {
   return approval;
 }
 
+/** Load an approval under a row lock; callers must invoke this on a transaction executor. */
+export async function getApprovalForUpdate(db: DatabaseExecutor, id: string) {
+  const [approval] = await db.select().from(approvals).where(eq(approvals.id, id)).for("update").limit(1);
+  return approval;
+}
+
 export async function findApprovalByTriggerId(db: DatabaseExecutor, triggerId: string, venueId: string) {
   if (!venueId.trim()) throw new Error("venueId is required for approval lookup");
   const [approval] = await db.select().from(approvals).where(and(eq(approvals.triggerId, triggerId), eq(approvals.venueId, venueId))).limit(1);
+  return approval;
+}
+
+/** Update only when the row is still in the expected state, preventing double decisions. */
+export async function updateApprovalIfState(db: DatabaseExecutor, id: string, expectedState: string, values: Partial<NewApproval>) {
+  const [approval] = await db.update(approvals).set(values).where(and(eq(approvals.id, id), eq(approvals.state, expectedState))).returning();
   return approval;
 }
 

@@ -8,10 +8,12 @@ describe("Task 4 idempotency migration upgrade path", () => {
   const forwardSql = readFileSync(resolve(root, "drizzle/0001_sparkling_callisto.sql"), "utf8");
   const auditForwardSql = readFileSync(resolve(root, "drizzle/0002_burly_maverick.sql"), "utf8");
   const task6ForwardSql = readFileSync(resolve(root, "drizzle/0003_worthless_hammerhead.sql"), "utf8");
+  const task7ForwardSql = readFileSync(resolve(root, "drizzle/0004_wooden_warlock.sql"), "utf8");
   const initialSnapshot = JSON.parse(readFileSync(resolve(root, "drizzle/meta/0000_snapshot.json"), "utf8")) as { tables: Record<string, { columns: Record<string, unknown>; indexes: Record<string, unknown> }> };
   const forwardSnapshot = JSON.parse(readFileSync(resolve(root, "drizzle/meta/0001_snapshot.json"), "utf8")) as { tables: Record<string, { columns: Record<string, unknown>; indexes: Record<string, unknown> }> };
   const auditSnapshot = JSON.parse(readFileSync(resolve(root, "drizzle/meta/0002_snapshot.json"), "utf8")) as { tables: Record<string, { columns: Record<string, unknown>; indexes: Record<string, unknown> }> };
   const task6Snapshot = JSON.parse(readFileSync(resolve(root, "drizzle/meta/0003_snapshot.json"), "utf8")) as { tables: Record<string, { columns: Record<string, unknown>; indexes: Record<string, unknown> }> };
+  const task7Snapshot = JSON.parse(readFileSync(resolve(root, "drizzle/meta/0004_snapshot.json"), "utf8")) as { tables: Record<string, { columns: Record<string, unknown>; indexes: Record<string, unknown> }> };
   const journal = JSON.parse(readFileSync(resolve(root, "drizzle/meta/_journal.json"), "utf8")) as { entries: Array<{ idx: number; tag: string }> };
 
   it("keeps the applied initial migration immutable and ships additions as forward migrations", () => {
@@ -26,6 +28,8 @@ describe("Task 4 idempotency migration upgrade path", () => {
     expect(task6ForwardSql).toContain('ALTER TABLE "copy_candidates" ADD COLUMN "ordinal" integer');
     expect(task6ForwardSql).toContain('ALTER TABLE "copy_candidates" ADD COLUMN "version" integer DEFAULT 1 NOT NULL');
     expect(task6ForwardSql).toContain('CREATE UNIQUE INDEX "copy_candidates_trigger_version_ordinal_idx"');
+    expect(task7ForwardSql).toContain('ALTER TABLE "promotions" ADD COLUMN "attempts" integer');
+    expect(task7ForwardSql).toContain('ALTER TABLE "promotions" ADD COLUMN "provider_receipt" jsonb');
   });
 
   it("records the upgrade in Drizzle journal and snapshots", () => {
@@ -34,6 +38,7 @@ describe("Task 4 idempotency migration upgrade path", () => {
       { idx: 1, tag: "0001_sparkling_callisto" },
       { idx: 2, tag: "0002_burly_maverick" },
       { idx: 3, tag: "0003_worthless_hammerhead" },
+      { idx: 4, tag: "0004_wooden_warlock" },
     ]);
     expect(initialSnapshot.tables["public.venues"]?.columns).not.toHaveProperty("idempotency_key");
     expect(initialSnapshot.tables["public.forecast_snapshots"]?.columns).not.toHaveProperty("request_key");
@@ -46,5 +51,7 @@ describe("Task 4 idempotency migration upgrade path", () => {
     expect(task6Snapshot.tables["public.copy_candidates"]?.columns).toHaveProperty("ordinal");
     expect(task6Snapshot.tables["public.copy_candidates"]?.columns).toHaveProperty("version");
     expect(task6Snapshot.tables["public.copy_candidates"]?.indexes).toHaveProperty("copy_candidates_trigger_version_ordinal_idx");
+    expect(task7Snapshot.tables["public.promotions"]?.columns).toHaveProperty("attempts");
+    expect(task7Snapshot.tables["public.promotions"]?.columns).toHaveProperty("provider_receipt");
   });
 });

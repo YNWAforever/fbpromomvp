@@ -190,6 +190,8 @@ export const promotions = pgTable(
     providerBroadcastId: text("provider_broadcast_id"),
     memberCount: integer("member_count"),
     sentCount: integer("sent_count"),
+    attempts: integer("attempts").notNull().default(0),
+    providerReceipt: jsonb("provider_receipt").$type<Record<string, unknown> | null>(),
     acceptedAt: timestamp("accepted_at", { withTimezone: true, mode: "date" }),
   },
   (table) => [
