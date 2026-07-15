@@ -105,8 +105,13 @@ export async function createApprovalForTrigger(input: CreateApprovalForTriggerIn
 
   const reconcileAcceptedSend = async (approvalRow: ApprovalRow, providerMessageId: string): Promise<CreateApprovalForTriggerResult> => {
     try {
-      if (approvalRow.providerMessageId !== providerMessageId) {
-        await updateApproval(input.db, approvalRow.id, { providerMessageId });
+      const stateNeedsReset = approvalRow.state === "send_failed";
+      const providerIdNeedsUpdate = approvalRow.providerMessageId !== providerMessageId;
+      if (stateNeedsReset || providerIdNeedsUpdate) {
+        await updateApproval(input.db, approvalRow.id, {
+          ...(stateNeedsReset ? { state: "pending" } : {}),
+          ...(providerIdNeedsUpdate ? { providerMessageId } : {}),
+        });
       }
       await appendAuditEvent(input.db, {
         actorType: "system",
@@ -122,7 +127,7 @@ export async function createApprovalForTrigger(input: CreateApprovalForTriggerIn
       (persistenceError as Error & { code?: string; cause?: unknown }).cause = error;
       throw persistenceError;
     }
-    return { approval: { ...approvalRow, providerMessageId }, candidates: [], requestKey };
+    return { approval: { ...approvalRow, ...(approvalRow.state === "send_failed" ? { state: "pending" } : {}), providerMessageId }, candidates: [], requestKey };
   };
 
   let approval: ApprovalRow | undefined;
@@ -252,8 +257,11 @@ export async function createApprovalForTrigger(input: CreateApprovalForTriggerIn
     return { approval: { ...approval, state: "send_failed" }, candidates, requestKey };
   }
 
+  const persistedSendState = retryingSendFailure
+    ? { state: "pending", providerMessageId: receipt.messageId }
+    : { providerMessageId: receipt.messageId };
   try {
-    await updateApproval(input.db, approval.id, { providerMessageId: receipt.messageId });
+    await updateApproval(input.db, approval.id, persistedSendState);
     await appendAuditEvent(input.db, {
       actorType: "system",
       action: "approval_requested",
@@ -280,5 +288,5 @@ export async function createApprovalForTrigger(input: CreateApprovalForTriggerIn
     (persistenceError as Error & { code?: string; cause?: unknown }).cause = error;
     throw persistenceError;
   }
-  return { approval: { ...approval, providerMessageId: receipt.messageId }, candidates, requestKey };
+  return { approval: { ...approval, ...persistedSendState }, candidates, requestKey };
 }

@@ -79,11 +79,15 @@ describe("createApprovalForTrigger", () => {
       repositories,
     };
 
-    await createApprovalForTrigger(input);
-    await expect(createApprovalForTrigger(input)).resolves.toMatchObject({ approval: { id: "approval-1" } });
+    const firstResult = await createApprovalForTrigger(input);
+    expect(firstResult.approval).toMatchObject({ id: "approval-1", state: "send_failed" });
+    const retryResult = await createApprovalForTrigger(input);
+    expect(retryResult.approval).toMatchObject({ id: "approval-1", state: "pending", providerMessageId: "woz-msg-retry" });
     expect(messagingProvider.sendApproval).toHaveBeenCalledTimes(2);
     expect(messagingProvider.sendApproval.mock.calls[0]?.[0].requestKey).toBe("approval:venue-1:trigger-1");
     expect(messagingProvider.sendApproval.mock.calls[1]?.[0].requestKey).toBe("approval:venue-1:trigger-1");
+    expect(repositories.updateApproval).toHaveBeenNthCalledWith(1, expect.anything(), "approval-1", { state: "send_failed" });
+    expect(repositories.updateApproval).toHaveBeenNthCalledWith(2, expect.anything(), "approval-1", { state: "pending", providerMessageId: "woz-msg-retry" });
   });
 
   it("does not classify local persistence failure after provider acceptance as a retryable provider send", async () => {
