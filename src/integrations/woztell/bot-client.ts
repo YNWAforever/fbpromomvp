@@ -9,6 +9,7 @@ export type ApprovalMessage = {
   expiresAt: string;
   candidates: ApprovalCandidateMessage[];
   ownerLink?: string;
+  requestKey?: string;
 };
 
 export type MessagingProvider = {
@@ -24,6 +25,8 @@ export type WozTellBotClientOptions = {
   treeId?: string;
   nodeId?: string;
   priorityGroupId?: string;
+  nonProductionAudienceIds?: string[] | string;
+  nonProductionAudiencePrefix?: string;
   productionChannelId?: string;
   productionEnvironmentId?: string;
   productionTreeId?: string;
@@ -75,6 +78,11 @@ export function createWozTellBotClient(options: WozTellBotClientOptions = {}): M
   const treeId = options.treeId ?? env.WOZTELL_TREE_ID;
   const nodeId = options.nodeId ?? env.WOZTELL_NODE_ID;
   const priorityGroupId = options.priorityGroupId ?? env.WOZTELL_PRIORITY_GROUP_ID;
+  const nonProductionAudienceIds = (options.nonProductionAudienceIds ?? env.WOZTELL_NON_PRODUCTION_AUDIENCE_IDS)
+    ? (Array.isArray(options.nonProductionAudienceIds) ? options.nonProductionAudienceIds : String(options.nonProductionAudienceIds ?? env.WOZTELL_NON_PRODUCTION_AUDIENCE_IDS).split(","))
+      .map((value) => value.trim()).filter(Boolean)
+    : [];
+  const nonProductionAudiencePrefix = (options.nonProductionAudiencePrefix ?? env.WOZTELL_NON_PRODUCTION_AUDIENCE_PREFIX)?.trim();
   const runtimeEnvironment = (options.runtimeEnvironment ?? process.env.VERCEL_ENV ?? process.env.NODE_ENV ?? "development").toLowerCase();
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const fetchImpl = options.fetch ?? globalThis.fetch;
@@ -92,7 +100,9 @@ export function createWozTellBotClient(options: WozTellBotClientOptions = {}): M
         if (!environmentId || !priorityGroupId) throw new WozTellIsolationError();
         const audienceIds = [channelId, environmentId, treeId, nodeId, priorityGroupId];
         const productionIds = [options.productionChannelId, options.productionEnvironmentId, options.productionTreeId, options.productionNodeId, options.productionPriorityGroupId].filter((value): value is string => Boolean(value));
-        if (audienceIds.some((value) => productionIds.includes(value) || looksLikeProductionAudienceId(value))) throw new WozTellIsolationError();
+        const hasPositiveAudienceConfig = nonProductionAudienceIds.length > 0 || Boolean(nonProductionAudiencePrefix);
+        const isExplicitlyNonProduction = (value: string) => nonProductionAudienceIds.includes(value) || Boolean(nonProductionAudiencePrefix && value.startsWith(nonProductionAudiencePrefix));
+        if (!hasPositiveAudienceConfig || audienceIds.some((value) => productionIds.includes(value) || looksLikeProductionAudienceId(value) || !isExplicitlyNonProduction(value))) throw new WozTellIsolationError();
       }
 
       const controller = new AbortController();
@@ -117,6 +127,7 @@ export function createWozTellBotClient(options: WozTellBotClientOptions = {}): M
             expiresAt: input.expiresAt,
             candidates: input.candidates,
             ...(input.ownerLink ? { ownerLink: input.ownerLink } : {}),
+            ...(input.requestKey ? { requestKey: input.requestKey } : {}),
           },
         };
         if (priorityGroupId) body.priorityGroupId = priorityGroupId;

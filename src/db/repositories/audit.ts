@@ -23,6 +23,15 @@ export async function appendAuditEvent(db: DatabaseExecutor, values: NewAuditEve
   return undefined;
 }
 
+export async function findAuditEventByIdempotencyKey(db: DatabaseExecutor, idempotencyKey: string) {
+  const [event] = await db
+    .select()
+    .from(auditEvents)
+    .where(eq(auditEvents.idempotencyKey, idempotencyKey))
+    .limit(1);
+  return event;
+}
+
 export async function listAuditEvents(db: DatabaseExecutor, objectType: string, objectId: string) {
   return db
     .select()

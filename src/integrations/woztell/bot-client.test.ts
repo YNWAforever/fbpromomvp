@@ -24,6 +24,7 @@ describe("WozTell Bot approval adapter", () => {
       treeId: "tree-1",
       nodeId: "node-1",
       priorityGroupId: "priority-1",
+      nonProductionAudienceIds: ["channel-1", "test-environment", "tree-1", "node-1", "priority-1"],
       runtimeEnvironment: "preview",
       fetch: fetchMock,
     });
@@ -70,6 +71,40 @@ describe("WozTell Bot approval adapter", () => {
     });
     await expect(client.sendApproval(message)).rejects.toBeInstanceOf(WozTellIsolationError);
   });
+  it("fails closed for opaque preview audience IDs without a positive allowlist", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    const client = createWozTellBotClient({
+      baseUrl: "https://bot.woztell.test",
+      accessToken: "woz-token",
+      channelId: "ch_9f3a",
+      environmentId: "env_71b2",
+      treeId: "tree_40a1",
+      nodeId: "node_23d9",
+      priorityGroupId: "pg_88ce",
+      runtimeEnvironment: "preview",
+      fetch: fetchMock,
+    });
+    await expect(client.sendApproval(message)).rejects.toBeInstanceOf(WozTellIsolationError);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("accepts a preview audience covered by an explicit test prefix", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ messageId: "woz-msg-prefix" }), { status: 200 }));
+    const client = createWozTellBotClient({
+      baseUrl: "https://bot.woztell.test",
+      accessToken: "woz-token",
+      channelId: "test-channel-1",
+      environmentId: "test-environment-1",
+      treeId: "test-tree-1",
+      nodeId: "test-node-1",
+      priorityGroupId: "test-priority-1",
+      nonProductionAudiencePrefix: "test-",
+      runtimeEnvironment: "preview",
+      fetch: fetchMock,
+    });
+    await expect(client.sendApproval(message)).resolves.toEqual({ messageId: "woz-msg-prefix" });
+  });
+
   it("redacts token and member IDs from provider errors", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockRejectedValue(new Error("woz-token member-secret failed"));
     const client = createWozTellBotClient({ baseUrl: "https://bot.woztell.test", accessToken: "woz-token", channelId: "channel-1", treeId: "tree-1", nodeId: "node-1", priorityGroupId: "priority-1", runtimeEnvironment: "test", fetch: fetchMock });

@@ -148,6 +148,8 @@ const serverEnvSchema = z
     WOZTELL_NODE_ID: optionalNonEmptyString,
     WOZTELL_WEBHOOK_SECRET: optionalNonEmptyString,
     WOZTELL_PRIORITY_GROUP_ID: optionalNonEmptyString,
+    WOZTELL_NON_PRODUCTION_AUDIENCE_IDS: optionalNonEmptyString,
+    WOZTELL_NON_PRODUCTION_AUDIENCE_PREFIX: optionalNonEmptyString,
     WOZTELL_OPEN_API_URL: z.url().default("https://open.api.woztell.com/v3"),
     WOZTELL_BOT_API_URL: z.url().default("https://bot.api.woztell.com"),
     OPENCODE_GO_API_KEY: optionalNonEmptyString,
