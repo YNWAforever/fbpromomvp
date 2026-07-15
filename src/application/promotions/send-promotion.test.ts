@@ -45,4 +45,45 @@ describe("sendPromotion safety", () => {
     expect(provider.createBroadcast).not.toHaveBeenCalled();
     expect(audit).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ action: "promotion_retry_exhausted" }));
   });
+
+  it("does not mark provider success as send_failed when accepted persistence fails", async () => {
+    const receipt = { broadcastId: "broadcast-accepted", memberCount: 4, sentCount: 4 };
+    const updateIfState = vi.fn()
+      .mockResolvedValueOnce({ ...base, state: "sending", attempts: 2 })
+      .mockRejectedValueOnce(new Error("database unavailable"));
+    const audit = vi.fn().mockResolvedValue(undefined);
+    const provider = { createBroadcast: vi.fn().mockResolvedValue(receipt) };
+    await expect(sendPromotion({
+      db: {} as never,
+      promotionId: "promotion-1",
+      audienceId: "test-audience",
+      provider,
+      repositories: { getPromotion: vi.fn().mockResolvedValue(base), updatePromotionIfState: updateIfState, appendAuditEvent: audit },
+    })).rejects.toMatchObject({ code: "send_persistence_failed" });
+    expect(provider.createBroadcast).toHaveBeenCalledTimes(1);
+    expect(updateIfState).toHaveBeenNthCalledWith(2, expect.anything(), "promotion-1", "sending", expect.objectContaining({ state: "accepted", providerBroadcastId: receipt.broadcastId }));
+    expect(audit).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ action: "promotion_send_persistence_failed" }));
+    expect(audit).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ action: "promotion_send_failed" }));
+  });
+
+  it("reconciles an accepted receipt marker without sending to the provider again", async () => {
+    const receipt = { broadcastId: "broadcast-accepted", memberCount: 4, sentCount: 4 };
+    const updateIfState = vi.fn().mockResolvedValue({ ...base, state: "accepted", attempts: 2, providerReceipt: receipt });
+    const provider = { createBroadcast: vi.fn() };
+    const result = await sendPromotion({
+      db: {} as never,
+      promotionId: "promotion-1",
+      audienceId: "test-audience",
+      provider,
+      repositories: {
+        getPromotion: vi.fn().mockResolvedValue({ ...base, state: "sending", attempts: 2 }),
+        updatePromotionIfState: updateIfState,
+        findAuditEventByIdempotencyKey: vi.fn().mockResolvedValue({ metadata: { providerReceipt: receipt } }),
+        appendAuditEvent: vi.fn().mockResolvedValue(undefined),
+      },
+    });
+    expect(provider.createBroadcast).not.toHaveBeenCalled();
+    expect(updateIfState).toHaveBeenCalledWith(expect.anything(), "promotion-1", "sending", expect.objectContaining({ state: "accepted", providerBroadcastId: receipt.broadcastId }));
+    expect(result).toMatchObject({ state: "accepted", receipt });
+  });
 });
