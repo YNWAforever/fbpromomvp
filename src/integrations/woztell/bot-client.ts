@@ -24,6 +24,11 @@ export type WozTellBotClientOptions = {
   treeId?: string;
   nodeId?: string;
   priorityGroupId?: string;
+  productionChannelId?: string;
+  productionEnvironmentId?: string;
+  productionTreeId?: string;
+  productionNodeId?: string;
+  productionPriorityGroupId?: string;
   runtimeEnvironment?: string;
   timeoutMs?: number;
   fetch?: typeof globalThis.fetch;
@@ -49,6 +54,9 @@ function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
+function looksLikeProductionAudienceId(value: string): boolean {
+  return /(^|[-_:])prod(?:uction)?([-_:]|$)/iu.test(value) || /(^|[-_:])live([-_:]|$)/iu.test(value);
+}
 function responseMessageId(payload: unknown): string | undefined {
   const root = record(payload);
   const data = record(root.data);
@@ -80,7 +88,12 @@ export function createWozTellBotClient(options: WozTellBotClientOptions = {}): M
         throw new WozTellProviderError("WozTell approval payload is invalid", "invalid_payload");
       }
       // Test/preview sends must be restricted to the configured Priority Group.
-      if (runtimeEnvironment !== "production" && !priorityGroupId) throw new WozTellIsolationError();
+      if (runtimeEnvironment !== "production") {
+        if (!environmentId || !priorityGroupId) throw new WozTellIsolationError();
+        const audienceIds = [channelId, environmentId, treeId, nodeId, priorityGroupId];
+        const productionIds = [options.productionChannelId, options.productionEnvironmentId, options.productionTreeId, options.productionNodeId, options.productionPriorityGroupId].filter((value): value is string => Boolean(value));
+        if (audienceIds.some((value) => productionIds.includes(value) || looksLikeProductionAudienceId(value))) throw new WozTellIsolationError();
+      }
 
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);

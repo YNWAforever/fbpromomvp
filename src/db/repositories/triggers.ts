@@ -1,4 +1,4 @@
-import { desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import type { DatabaseExecutor } from "../client";
 import { approvals, copyCandidates, liveReadings, triggers } from "../schema";
 import { assertSameVenue } from "./ownership";
@@ -112,11 +112,13 @@ export async function createCopyCandidate(db: DatabaseExecutor, values: NewCopyC
 }
 
 export async function createCopyCandidates(db: DatabaseExecutor, values: NewCopyCandidate[]) {
-  return values.length ? db.insert(copyCandidates).values(values).returning() : [];
+  if (!values.length) return [];
+  const rows = await db.insert(copyCandidates).values(values).returning();
+  return [...rows].sort((left, right) => (left.version - right.version) || (left.ordinal - right.ordinal) || left.id.localeCompare(right.id));
 }
 
 export async function listCopyCandidates(db: DatabaseExecutor, triggerId: string) {
-  return db.select().from(copyCandidates).where(eq(copyCandidates.triggerId, triggerId)).orderBy(copyCandidates.createdAt);
+  return db.select().from(copyCandidates).where(eq(copyCandidates.triggerId, triggerId)).orderBy(asc(copyCandidates.version), asc(copyCandidates.ordinal), asc(copyCandidates.id));
 }
 
 export async function createApproval(db: DatabaseExecutor, values: NewApproval) {
@@ -130,8 +132,9 @@ export async function getApproval(db: DatabaseExecutor, id: string) {
   return approval;
 }
 
-export async function findApprovalByTriggerId(db: DatabaseExecutor, triggerId: string) {
-  const [approval] = await db.select().from(approvals).where(eq(approvals.triggerId, triggerId)).limit(1);
+export async function findApprovalByTriggerId(db: DatabaseExecutor, triggerId: string, venueId: string) {
+  if (!venueId.trim()) throw new Error("venueId is required for approval lookup");
+  const [approval] = await db.select().from(approvals).where(and(eq(approvals.triggerId, triggerId), eq(approvals.venueId, venueId))).limit(1);
   return approval;
 }
 

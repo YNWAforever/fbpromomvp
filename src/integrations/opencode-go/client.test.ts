@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createOpenCodeGoClient } from "./client";
 import type { CopyInput } from "@/domain/copy/types";
+import { OPT_OUT_TEXT } from "@/domain/copy/validate";
 
 const input: CopyInput = {
   venueName: "Harbour Cafe",
@@ -30,6 +31,20 @@ describe("OpenCode Go copy adapter", () => {
     expect(String(request?.body)).toContain("currentDelta");
   });
 
+  it("injects the offer expiry and opt-out wording into model candidates", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ candidates: [
+        { body: input.facts.benefit },
+        { body: `${input.facts.benefit}.\u512a\u60e0\u6709\u6548\u81f3 2026-07-14T10:15:00.000Z.` },
+        { body: input.facts.benefit },
+      ] }) } }] }), { status: 200 }),
+    );
+    const client = createOpenCodeGoClient({ baseUrl: "https://opencode.test/v1", apiKey: "secret-key", model: "test-model", fetch: fetchMock });
+    const candidates = await client.generate({ ...input, expiresAt: "2026-07-14T12:00:00.000Z" });
+    expect(candidates).toHaveLength(3);
+    expect(candidates.every((candidate) => candidate.body.includes("2026-07-14T12:00:00.000Z"))).toBe(true);
+    expect(candidates.every((candidate) => candidate.body.includes(OPT_OUT_TEXT))).toBe(true);
+  });
   it("fills invalid model outputs from deterministic fallbacks and redacts keys", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockRejectedValue(new Error("upstream secret-key failed"));
     const client = createOpenCodeGoClient({ baseUrl: "https://opencode.test/v1", apiKey: "secret-key", fetch: fetchMock });

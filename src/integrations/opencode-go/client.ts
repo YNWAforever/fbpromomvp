@@ -1,6 +1,6 @@
 import { env } from "@/env";
 import { fallbackCandidates } from "@/domain/copy/fallback";
-import { validateCopyCandidate } from "@/domain/copy/validate";
+import { normalizeCopyBody, validateCopyCandidate } from "@/domain/copy/validate";
 import type { CopyCandidate, CopyInput, CopyProvider } from "@/domain/copy/types";
 import { z } from "zod";
 
@@ -93,8 +93,9 @@ export function createOpenCodeGoClient(options: OpenCodeGoClientOptions = {}): C
         const raw = await request(input);
         modelCandidates = raw
           .map(({ body }) => {
-            const validation = validateCopyCandidate(body, input.facts);
-            return { body, source: "model" as const, ...validation };
+            const normalizedBody = normalizeCopyBody(body, input.expiresAt);
+            const validation = validateCopyCandidate(normalizedBody, input.facts, { expiresAt: input.expiresAt });
+            return { body: normalizedBody, source: "model" as const, ...validation };
           })
           .filter((candidate) => candidate.valid);
       } catch {

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createApprovalForTrigger } from "./create-approval";
+import { OPT_OUT_TEXT } from "@/domain/copy/validate";
 
 describe("createApprovalForTrigger", () => {
   it("persists exactly three candidates, sends approval, and is idempotent by trigger", async () => {
@@ -14,7 +15,7 @@ describe("createApprovalForTrigger", () => {
     const messagingProvider = { sendApproval: vi.fn().mockResolvedValue({ messageId: "woz-msg-1" }) };
     const repositories = {
       findApprovalByTriggerId: vi.fn().mockResolvedValue(undefined),
-      createCopyCandidates: vi.fn().mockImplementation(async (_db, values) => { insertedCandidates.push(...values); return values.map((value: Record<string, unknown>, index: number) => ({ ...value, id: `candidate-${index + 1}` })); }),
+      createCopyCandidates: vi.fn().mockImplementation(async (_db, values) => { insertedCandidates.push(...values); return [...values].reverse().map((value: Record<string, unknown>, index: number) => ({ ...value, id: `candidate-${index + 1}` })); }),
       createApproval: vi.fn().mockImplementation(async (_db, value) => { const approval = { ...value, id: "approval-1" }; insertedApprovals.push(approval); return approval; }),
       updateApproval: vi.fn().mockImplementation(async (_db, _id, value) => { updates.push(value); return { id: "approval-1", ...value }; }),
       appendAuditEvent: vi.fn(),
@@ -26,6 +27,13 @@ describe("createApprovalForTrigger", () => {
     expect(updates).toContainEqual({ providerMessageId: "woz-msg-1" });
     expect(messagingProvider.sendApproval).toHaveBeenCalledWith(expect.objectContaining({ approvalId: "approval-1", memberId: "member-1", candidates: expect.any(Array) }));
     expect(result.approval.id).toBe("approval-1");
+    expect(insertedApprovals[0]?.expiresAt).toEqual(new Date("2026-07-14T10:15:00.000Z"));
+    const sent = vi.mocked(messagingProvider.sendApproval).mock.calls[0]?.[0];
+    expect(sent?.expiresAt).toBe("2026-07-14T10:15:00.000Z");
+    expect(insertedCandidates.every((candidate) => String(candidate.body).includes("2026-07-14T12:00:00.000Z"))).toBe(true);
+    expect(insertedCandidates.every((candidate) => String(candidate.body).includes(OPT_OUT_TEXT))).toBe(true);
+    expect(insertedCandidates.map((candidate) => candidate.ordinal)).toEqual([0, 1, 2]);
+    expect(insertedCandidates.every((candidate) => candidate.version === 1)).toBe(true);
   });
 
   it("marks a send failure without creating a promotion", async () => {
@@ -42,6 +50,47 @@ describe("createApprovalForTrigger", () => {
     expect(repositories.appendAuditEvent).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ action: "approval_send_failed" }));
   });
 
+  it("does not classify local persistence failure after provider acceptance as a retryable provider send", async () => {
+    const messagingProvider = { sendApproval: vi.fn().mockResolvedValue({ messageId: "woz-msg-accepted" }) };
+    const updateApproval = vi.fn().mockRejectedValue(new Error("database unavailable"));
+    const repositories = {
+      findApprovalByTriggerId: vi.fn().mockResolvedValue(undefined),
+      createCopyCandidates: vi.fn().mockResolvedValue([{ id: "candidate-1" }, { id: "candidate-2" }, { id: "candidate-3" }]),
+      createApproval: vi.fn().mockResolvedValue({ id: "approval-1", venueId: "venue-1", triggerId: "trigger-1", state: "pending" }),
+      updateApproval,
+      appendAuditEvent: vi.fn(),
+    };
+    await expect(createApprovalForTrigger({
+      db: {} as never,
+      triggerId: "trigger-1",
+      venueId: "venue-1",
+      memberId: "member-1",
+      venueName: "Harbour Cafe",
+      facts: { headline: "promotion", benefit: "discount HK$100 minus HK$20", conditions: [] },
+      copyProvider: { generate: vi.fn().mockResolvedValue([]) },
+      messagingProvider,
+      repositories,
+    })).rejects.toMatchObject({ code: "send_persistence_failed" });
+    expect(messagingProvider.sendApproval).toHaveBeenCalledTimes(1);
+    expect(updateApproval).toHaveBeenCalledTimes(1);
+    expect(repositories.appendAuditEvent).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ action: "approval_send_failed" }));
+  });
+
+  it("passes venue scope to approval lookups", async () => {
+    const findApprovalByTriggerId = vi.fn().mockResolvedValue({ id: "approval-existing", venueId: "venue-1", triggerId: "trigger-1", state: "pending" });
+    await createApprovalForTrigger({
+      db: {} as never,
+      triggerId: "trigger-1",
+      venueId: "venue-1",
+      memberId: "member-1",
+      venueName: "Harbour Cafe",
+      facts: { headline: "promotion", benefit: "discount HK$100 minus HK$20", conditions: [] },
+      copyProvider: { generate: vi.fn() },
+      messagingProvider: { sendApproval: vi.fn() },
+      repositories: { findApprovalByTriggerId },
+    });
+    expect(findApprovalByTriggerId).toHaveBeenCalledWith(expect.anything(), "trigger-1", "venue-1");
+  });
   it("does not persist candidates or send when another request wins the approval uniqueness race", async () => {
     const racedApproval = { id: "approval-raced", venueId: "venue-1", triggerId: "trigger-1", state: "pending" };
     const findApprovalByTriggerId = vi.fn()

@@ -4,7 +4,7 @@ import { validateCopyCandidate } from "./validate";
 const OPT_OUT = "如不想收到優惠，請回覆「停止」";
 
 function fallback(body: string, input: CopyInput): CopyCandidate {
-  const validation = validateCopyCandidate(body, input.facts);
+  const validation = validateCopyCandidate(body, input.facts, { expiresAt: input.expiresAt });
   return { body, source: "fallback", ...validation };
 }
 

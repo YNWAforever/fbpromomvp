@@ -40,6 +40,36 @@ describe("WozTell Bot approval adapter", () => {
     await expect(client.sendApproval(message)).rejects.toBeInstanceOf(WozTellIsolationError);
   });
 
+  it("fails closed when preview/test is pointed at production audience IDs", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    const client = createWozTellBotClient({
+      baseUrl: "https://bot.woztell.test",
+      accessToken: "woz-token",
+      channelId: "prod-channel",
+      environmentId: "prod-environment",
+      treeId: "prod-tree",
+      nodeId: "prod-node",
+      priorityGroupId: "prod-priority",
+      runtimeEnvironment: "preview",
+      fetch: fetchMock,
+    });
+    await expect(client.sendApproval(message)).rejects.toBeInstanceOf(WozTellIsolationError);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("requires a non-production environment as well as a Priority Group", async () => {
+    const client = createWozTellBotClient({
+      baseUrl: "https://bot.woztell.test",
+      accessToken: "woz-token",
+      channelId: "channel-1",
+      treeId: "tree-1",
+      nodeId: "node-1",
+      priorityGroupId: "priority-1",
+      runtimeEnvironment: "test",
+      fetch: vi.fn(),
+    });
+    await expect(client.sendApproval(message)).rejects.toBeInstanceOf(WozTellIsolationError);
+  });
   it("redacts token and member IDs from provider errors", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockRejectedValue(new Error("woz-token member-secret failed"));
     const client = createWozTellBotClient({ baseUrl: "https://bot.woztell.test", accessToken: "woz-token", channelId: "channel-1", treeId: "tree-1", nodeId: "node-1", priorityGroupId: "priority-1", runtimeEnvironment: "test", fetch: fetchMock });

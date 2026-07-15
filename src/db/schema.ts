@@ -128,13 +128,18 @@ export const copyCandidates = pgTable(
     id: id(),
     createdAt: createdAt(),
     triggerId: uuid("trigger_id").notNull().references(() => triggers.id, { onDelete: "cascade" }),
+    ordinal: integer("ordinal").notNull().default(0),
+    version: integer("version").notNull().default(1),
     provider: text("provider").notNull(),
     body: text("body").notNull(),
     source: text("source").notNull(),
     valid: boolean("valid").notNull(),
     validationErrors: jsonb("validation_errors").$type<string[]>().notNull().default([]),
   },
-  (table) => [uniqueIndex("copy_candidates_trigger_id_idx").on(table.triggerId, table.id)],
+  (table) => [
+    uniqueIndex("copy_candidates_trigger_id_idx").on(table.triggerId, table.id),
+    uniqueIndex("copy_candidates_trigger_version_ordinal_idx").on(table.triggerId, table.version, table.ordinal),
+  ],
 );
 
 export const approvals = pgTable(
