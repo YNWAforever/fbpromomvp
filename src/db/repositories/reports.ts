@@ -29,6 +29,20 @@ export function nextRedemptionRevision(
   return { changed: true, revision: expected };
 }
 
+export function resolveConcurrentFirstRedemption<T extends ExistingRedemption>(
+  raced: T | undefined,
+  incoming: RedemptionValues,
+): T {
+  if (!raced) throw new Error("redemption report insert lost a concurrent write");
+  if (
+    raced.revision !== 1
+    || raced.count !== incoming.count
+    || (raced.note ?? null) !== (incoming.note ?? null)
+  ) {
+    throw new Error("redemption report changed concurrently; retry with the latest revision");
+  }
+  return raced;
+}
 export async function getRedemptionReport(db: DatabaseExecutor, promotionId: string) {
   const [report] = await db.select().from(redemptionReports).where(eq(redemptionReports.promotionId, promotionId)).limit(1);
   return report;
@@ -47,11 +61,8 @@ export async function upsertRedemptionReport(db: DatabaseExecutor, values: NewRe
       .onConflictDoNothing({ target: redemptionReports.promotionId })
       .returning();
     if (report) return report;
-    // Another writer inserted the row between the read and insert. Re-read it
-    // and force the caller through the same monotonic guard on the next call.
     const raced = await getRedemptionReport(db, values.promotionId);
-    if (!raced) throw new Error("redemption report insert lost a concurrent write");
-    return raced;
+    return resolveConcurrentFirstRedemption(raced, values);
   }
 
   const [report] = await db

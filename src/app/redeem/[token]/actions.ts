@@ -14,11 +14,11 @@ export async function submitRedemptionAction(formData: FormData) {
   const countValue = value(formData, "count");
   const note = value(formData, "note") || null;
   const count = Number(countValue);
-  if (!token || !Number.isInteger(count)) return { ok: false, error: "Enter a whole-number redemption count." };
+  if (!token || !countValue || !Number.isInteger(count)) return { ok: false, error: "Enter a whole-number redemption count." };
   try {
     const result = await withDatabase((db) => submitRedemption({ db, token, secret: env.OWNER_LINK_SECRET, count, note }));
     return { ok: true, report: { count: result.count, revision: result.revision } };
-  } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : "Unable to save redemption count." };
+  } catch {
+    return { ok: false, error: "Unable to save redemption count." };
   }
 }
