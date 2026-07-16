@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import type { DatabaseExecutor } from "../client";
 import { redemptionReports, weeklyReports } from "../schema";
 
@@ -79,6 +79,21 @@ export async function createWeeklyReport(db: DatabaseExecutor, values: NewWeekly
   return report;
 }
 
+export async function getWeeklyReport(db: DatabaseExecutor, id: string) {
+  const [report] = await db.select().from(weeklyReports).where(eq(weeklyReports.id, id)).limit(1);
+  return report;
+}
+export async function claimWeeklyReportDelivery(db: DatabaseExecutor, id: string) {
+  const [report] = await db
+    .update(weeklyReports)
+    .set({ state: "sending" })
+    .where(and(
+      eq(weeklyReports.id, id),
+      inArray(weeklyReports.state, ["generated", "incomplete", "failed"]),
+    ))
+    .returning();
+  return report;
+}
 export async function findWeeklyReport(db: DatabaseExecutor, venueId: string, periodStart: Date) {
   const [report] = await db
     .select()
