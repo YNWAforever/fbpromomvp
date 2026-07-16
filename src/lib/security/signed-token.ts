@@ -88,3 +88,37 @@ export function verifyScopedApprovalToken(token: string, secret: string, now = n
     return null;
   }
 }
+
+export type ScopedRedemptionLinkInput = {
+  baseUrl: string;
+  secret: string;
+  promotionId: string;
+  expiresAt: Date | string | number;
+  now?: Date;
+};
+
+/** Build a promotion-scoped redemption URL with an expiry no longer than the promotion window. */
+export function createScopedRedemptionLink(input: ScopedRedemptionLinkInput): string {
+  if (!input.secret || !input.promotionId.trim() || !input.baseUrl.trim()) {
+    throw new Error("invalid scoped redemption link input");
+  }
+  const baseUrl = new URL(input.baseUrl);
+  if (!/^https?:$/i.test(baseUrl.protocol)) throw new Error("invalid scoped redemption link base URL");
+  const now = input.now ?? new Date();
+  const nowMs = now.getTime();
+  const expiresMs = input.expiresAt instanceof Date
+    ? input.expiresAt.getTime()
+    : typeof input.expiresAt === "number"
+      ? input.expiresAt
+      : new Date(input.expiresAt).getTime();
+  if (!Number.isFinite(nowMs) || !Number.isFinite(expiresMs) || expiresMs <= nowMs) {
+    throw new Error("invalid scoped redemption link expiry");
+  }
+  const boundedExpiry = Math.min(expiresMs, nowMs + 2 * 60 * 60 * 1000);
+  const token = signScopedToken({
+    scope: "promotion",
+    subject: input.promotionId,
+    exp: Math.floor(boundedExpiry / 1000),
+  }, input.secret);
+  return baseUrl.toString().replace(/\/+$/, "") + "/redeem/" + token;
+}

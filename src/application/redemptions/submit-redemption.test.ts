@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { signScopedToken } from "@/lib/security/signed-token";
+import { createScopedRedemptionLink, signScopedToken } from "@/lib/security/signed-token";
 import { submitRedemption } from "./submit-redemption";
 
 describe("submitRedemption", () => {
@@ -74,5 +74,10 @@ describe("submitRedemption", () => {
       },
     })).rejects.toThrow("concurrently");
     expect(audit).not.toHaveBeenCalled();
+  });
+
+  it("creates a promotion-scoped redemption URL for production owner flows", () => {
+    const link = createScopedRedemptionLink({ baseUrl: "https://example.test/", secret, promotionId: "promotion-1", expiresAt: new Date("2026-07-30T00:00:00.000Z") });
+    expect(link).toMatch(/^https:\/\/example\.test\/redeem\/[^.]+\.[^.]+$/);
   });
 });

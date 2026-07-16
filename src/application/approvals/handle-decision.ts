@@ -6,16 +6,17 @@ import { getApproval, getApprovalForUpdate, listCopyCandidates, updateApproval, 
 import { validateCopyCandidate } from "@/domain/copy/validate";
 import { createCampaignCode } from "@/domain/promotions/code";
 import { resolveApproval, type ApprovalAction } from "@/domain/approvals/resolve";
+import { createScopedRedemptionLink } from "@/lib/security/signed-token";
 
 export const decisionSchema = z.object({ eventId: z.string().trim().min(1).max(200), approvalId: z.string().trim().min(1), action: z.enum(["select", "edit", "approve", "skip"]), candidateId: z.string().trim().min(1).optional(), editedBody: z.string().trim().max(500).optional(), occurredAt: z.union([z.string(), z.date()]), venueId: z.string().trim().min(1).optional() });
 export type ApprovalDecisionPayload = z.infer<typeof decisionSchema>;
-export type ApprovalDecisionResult = { status: "duplicate" | "invalid" | "expired" | "selected" | "edited" | "skipped" | "approved"; approval?: Record<string, unknown>; promotion?: Record<string, unknown>; reason?: string };
+export type ApprovalDecisionResult = { status: "duplicate" | "invalid" | "expired" | "selected" | "edited" | "skipped" | "approved"; approval?: Record<string, unknown>; promotion?: Record<string, unknown>; redemptionLink?: string; reason?: string };
 type Candidate = { id: string; triggerId?: string; body?: string; [key: string]: unknown };
 type Approval = { id: string; venueId: string; triggerId: string; state: string; selectedCandidateId?: string | null; expiresAt: Date; [key: string]: unknown };
 type Repositories = { getApproval: typeof getApproval; getApprovalForUpdate?: typeof getApprovalForUpdate; updateApproval: typeof updateApproval; updateApprovalIfState?: typeof updateApprovalIfState; listCopyCandidates: typeof listCopyCandidates; createPromotion: typeof createPromotion; findPromotionByApprovalId: typeof findPromotionByApprovalId; appendAuditEvent: typeof appendAuditEvent; findAuditEventByIdempotencyKey: typeof findAuditEventByIdempotencyKey; updateCopyCandidate?: (db: DatabaseExecutor, id: string, values: Record<string, unknown>) => Promise<unknown>; checkLimits?: (input: { db: DatabaseExecutor; venueId: string; now: Date }) => Promise<boolean> };
 async function inTransaction<T>(db: DatabaseExecutor, work: (executor: DatabaseExecutor) => Promise<T>): Promise<T> { const candidate = db as DatabaseExecutor & { transaction?: (fn: (tx: DatabaseExecutor) => Promise<T>) => Promise<T> }; return typeof candidate.transaction === "function" ? candidate.transaction(work) : work(db); }
 
-export async function handleApprovalDecision(input: { db: DatabaseExecutor; payload: ApprovalDecisionPayload; now?: Date; facts?: { headline: string; benefit: string; conditions: string[] }; repositories?: Partial<Repositories> }): Promise<ApprovalDecisionResult> {
+export async function handleApprovalDecision(input: { db: DatabaseExecutor; payload: ApprovalDecisionPayload; now?: Date; facts?: { headline: string; benefit: string; conditions: string[] }; appBaseUrl?: string; redemptionSecret?: string; redemptionLinkExpiresAt?: Date; repositories?: Partial<Repositories> }): Promise<ApprovalDecisionResult> {
   const payload = decisionSchema.parse(input.payload);
   const occurredAt = payload.occurredAt instanceof Date ? payload.occurredAt : new Date(payload.occurredAt); if (Number.isNaN(occurredAt.getTime())) return { status: "invalid", reason: "occurred_at_invalid" };
   const repository = { getApproval, updateApproval, listCopyCandidates, createPromotion, findPromotionByApprovalId, appendAuditEvent, findAuditEventByIdempotencyKey, ...input.repositories } as Repositories;
@@ -70,7 +71,10 @@ export async function handleApprovalDecision(input: { db: DatabaseExecutor; payl
     const promotion = existing ?? await repository.createPromotion(db, { venueId: approval.venueId, approvalId: approval.id, campaignCode: createCampaignCode(approval.id), body, state: "queued", validFrom: now, validUntil: new Date(now.getTime() + 2 * 60 * 60 * 1000) } as never) as unknown as Record<string, unknown>;
     const updated = await updateState(approval.id, approval.state, { state: "approved", selectedCandidateId: candidate!.id, resolvedAt: now });
     await repository.appendAuditEvent(db, { actorType: "owner", action: "approval_approved", objectType: "approval", objectId: approval.id, idempotencyKey: eventKey, metadata: { venueId: approval.venueId, promotionId: promotion?.id, eventId: payload.eventId } });
-    return { status: "approved", approval: updated as unknown as Record<string, unknown>, promotion };
+    const redemptionLink = input.appBaseUrl && input.redemptionSecret && promotion?.id
+      ? createScopedRedemptionLink({ baseUrl: input.appBaseUrl, secret: input.redemptionSecret, promotionId: String(promotion.id), expiresAt: input.redemptionLinkExpiresAt ?? new Date(now.getTime() + 2 * 60 * 60 * 1000) })
+      : undefined;
+    return { status: "approved", approval: updated as unknown as Record<string, unknown>, promotion, ...(redemptionLink ? { redemptionLink } : {}) };
   });
 }
 

@@ -24,7 +24,7 @@ export async function POST(request: Request) {
   if (!body || typeof body !== "object") return error("request body must be an object", 400);
   const payload = ((body as Record<string, unknown>).event ?? body) as ApprovalDecisionPayload;
   try {
-    const result = await withDatabase((db) => handleApprovalDecision({ db, payload }));
+    const result = await withDatabase((db) => handleApprovalDecision({ db, appBaseUrl: env.APP_BASE_URL, redemptionSecret: env.OWNER_LINK_SECRET, payload }));
     const status = result.status === "invalid" ? 400 : 200;
     return NextResponse.json(result, { status });
   } catch { return error("invalid webhook payload", 400); }
