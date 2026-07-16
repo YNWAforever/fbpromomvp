@@ -76,7 +76,7 @@ describe("weekly report delivery", () => {
         venue: { id: "venue-1", name: "Harbour Cafe" },
         report: {
           id: "report-1",
-          state: "sent",
+          state: "sending",
           providerMessageId: "existing-message",
           periodStart: "2026-07-06T00:00:00Z",
           periodEnd: "2026-07-13T00:00:00Z",
@@ -184,5 +184,42 @@ describe("weekly report delivery", () => {
     expect(stored).toMatchObject({ state: "failed" });
     expect(update).toHaveBeenNthCalledWith(1, expect.anything(), "report-1", { state: "sending" });
     expect(update).toHaveBeenNthCalledWith(2, expect.anything(), "report-1", { state: "failed" });
+  });
+
+  it("keeps ambiguous provider responses in sending for reconciliation", async () => {
+    let stored: Record<string, unknown> = {
+      id: "report-1",
+      state: "generated",
+      periodStart: "2026-07-06T00:00:00Z",
+      periodEnd: "2026-07-13T00:00:00Z",
+    };
+    const update = vi.fn(async (_db: unknown, _id: string, values: Record<string, unknown>) => {
+      stored = { ...stored, ...values };
+      return stored;
+    });
+    const provider = {
+      sendReport: vi.fn(async () => {
+        const error = new Error("provider rate limit");
+        Object.assign(error, { code: "http_429" });
+        throw error;
+      }),
+    };
+
+    await expect(sendWeeklyReports({
+      db: {} as never,
+      generated: [{
+        venue: { id: "venue-1", name: "Harbour Cafe" },
+        report: stored,
+        ownerMemberId: "owner-1",
+      }],
+      provider,
+      baseUrl: "https://example.test",
+      secret,
+      repositories: { updateWeeklyReport: update as unknown as typeof updateWeeklyReport },
+    })).rejects.toThrow("provider rate limit");
+
+    expect(stored).toMatchObject({ state: "sending" });
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(update).toHaveBeenCalledWith(expect.anything(), "report-1", { state: "sending" });
   });
 });

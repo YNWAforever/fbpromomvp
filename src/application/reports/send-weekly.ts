@@ -8,10 +8,12 @@ function isDefinitelyUnsent(error: unknown): boolean {
   const code = error && typeof error === "object" && "code" in error
     ? (error as { code?: unknown }).code
     : undefined;
-  return code === "credentials_unavailable"
-    || code === "invalid_payload"
-    || code === "audience_isolation"
-    || (typeof code === "string" && /^http_4\d{2}$/u.test(code));
+  if (code === "credentials_unavailable" || code === "invalid_payload" || code === "audience_isolation") return true;
+  if (typeof code !== "string") return false;
+  const match = /^http_(\d{3})$/u.exec(code);
+  if (!match) return false;
+  const status = Number(match[1]);
+  return status >= 400 && status < 500 && ![408, 409, 425, 429].includes(status);
 }
 
 export type WeeklyReportMessage = {
@@ -59,14 +61,14 @@ export async function sendWeeklyReports(input: {
     const reportId = String(item.report.id ?? "");
     const venueId = String(item.venue.id ?? "");
     if (!reportId || !venueId) throw new Error("weekly report delivery input is incomplete");
+if (item.report.state === "sent" || (typeof item.report.providerMessageId === "string" && item.report.providerMessageId.trim())) {
+      reports.push(item.report);
+      alreadySent += 1;
+      continue;
+    }
     if (item.report.state === "sending") {
       reports.push(item.report);
       uncertain += 1;
-      continue;
-    }
-    if (item.report.state === "sent" || (typeof item.report.providerMessageId === "string" && item.report.providerMessageId.trim())) {
-      reports.push(item.report);
-      alreadySent += 1;
       continue;
     }
     if (!item.ownerMemberId) {

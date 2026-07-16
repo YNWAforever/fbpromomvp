@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import type { DatabaseExecutor } from "../client";
 import { redemptionReports, weeklyReports } from "../schema";
 
@@ -90,6 +90,7 @@ export async function claimWeeklyReportDelivery(db: DatabaseExecutor, id: string
     .where(and(
       eq(weeklyReports.id, id),
       inArray(weeklyReports.state, ["generated", "incomplete", "failed"]),
+      isNull(weeklyReports.providerMessageId),
     ))
     .returning();
   return report;
