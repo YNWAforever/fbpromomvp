@@ -5,6 +5,7 @@ export type DashboardAction = (formData: FormData) => void | Promise<void>;
 export type OperationRow = {
   id: string;
   state: string;
+  attempts?: number;
   reason?: string;
   onRetry?: DashboardAction;
   onCancel?: DashboardAction;
@@ -49,7 +50,7 @@ export default function OperationsTable({ rows }: { rows: OperationRow[] }) {
               <td className="px-4 py-4 text-slate-400">{row.reason ?? "Unavailable"}</td>
               <td className="px-4 py-4">
                 <div className="flex flex-wrap gap-2">
-                  {row.state === "send_failed" ? <ActionButton label="Retry promotion" action={row.onRetry} rowId={row.id} /> : null}
+                  {row.state === "send_failed" && (row.attempts === undefined || row.attempts < 3) ? <ActionButton label="Retry promotion" action={row.onRetry} rowId={row.id} /> : null}
                   {row.state === "queued" || row.state === "send_failed" ? <ActionButton label="Cancel promotion" action={row.onCancel} rowId={row.id} /> : null}
                 </div>
               </td>

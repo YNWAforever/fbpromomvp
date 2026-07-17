@@ -69,6 +69,12 @@ describe("staff promotion operations actions", () => {
     expect(sender.sendPromotion).not.toHaveBeenCalled();
   });
 
+  it("rejects an exhausted send_failed promotion without calling the retry service", async () => {
+    promotions.getPromotion.mockResolvedValue({ ...basePromotion, attempts: 3 });
+
+    await expect(retryPromotionAction(form("promotion-1"))).resolves.toMatchObject({ ok: false, code: "invalid_state" });
+    expect(sender.sendPromotion).not.toHaveBeenCalled();
+  });
   it("passes the staff-approved audience to the Task 7 retry service", async () => {
     await expect(retryPromotionAction(form("promotion-1"))).resolves.toMatchObject({ ok: true, state: "accepted" });
     expect(sender.sendPromotion).toHaveBeenCalledWith(expect.objectContaining({

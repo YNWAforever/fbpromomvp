@@ -14,6 +14,11 @@ describe("staff dashboard primitives", () => {
     expect(screen.getByText("Send failed")).toBeInTheDocument();
   });
 
+  it("does not render a retry action after the retry limit", () => {
+    render(<OperationsTable rows={[{ id: "p-exhausted", state: "send_failed", attempts: 3, onRetry: vi.fn() }]} />);
+
+    expect(screen.queryByRole("button", { name: "Retry promotion" })).not.toBeInTheDocument();
+  });
   it("does not render a retry action for accepted promotions", () => {
     render(<OperationsTable rows={[{ id: "p2", state: "accepted" }]} />);
 

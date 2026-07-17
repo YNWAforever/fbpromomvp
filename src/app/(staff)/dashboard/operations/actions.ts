@@ -41,8 +41,8 @@ export async function retryPromotionAction(formData: FormData): Promise<Operatio
   return withDatabase(async (db) => {
     const promotion = await loadPromotion(db, promotionId);
     if (!promotion) return { ok: false, code: "not_found", error: "Promotion unavailable." };
-    if (promotion.state !== "send_failed") {
-      return { ok: false, code: "invalid_state", error: "Only send failed promotions can be retried." };
+    if (promotion.state !== "send_failed" || promotion.attempts >= 3) {
+      return { ok: false, code: "invalid_state", error: promotion.state === "send_failed" ? "Retry limit reached for this promotion." : "Only send failed promotions can be retried." };
     }
 
     const integrations = await listVenueIntegrations(db, promotion.venueId);
