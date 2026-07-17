@@ -31,6 +31,10 @@ export async function getPromotion(db: DatabaseExecutor, id: string) {
   return promotion;
 }
 
+export async function listPromotions(db: DatabaseExecutor, limit = 100) {
+  return db.select().from(promotions).orderBy(desc(promotions.createdAt)).limit(limit);
+}
+
 export async function findPromotionByApprovalId(db: DatabaseExecutor, approvalId: string) {
   const [promotion] = await db.select().from(promotions).where(eq(promotions.approvalId, approvalId)).limit(1);
   return promotion;

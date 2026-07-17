@@ -83,6 +83,10 @@ export async function getWeeklyReport(db: DatabaseExecutor, id: string) {
   const [report] = await db.select().from(weeklyReports).where(eq(weeklyReports.id, id)).limit(1);
   return report;
 }
+
+export async function listWeeklyReports(db: DatabaseExecutor, limit = 100) {
+  return db.select().from(weeklyReports).orderBy(weeklyReports.periodStart).limit(limit);
+}
 export async function claimWeeklyReportDelivery(db: DatabaseExecutor, id: string) {
   const [report] = await db
     .update(weeklyReports)
