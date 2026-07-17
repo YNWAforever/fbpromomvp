@@ -10,6 +10,7 @@ export type OperationRow = {
   onCancel?: DashboardAction;
 };
 
+
 function ActionButton({ label, action, rowId }: { label: string; action?: DashboardAction; rowId: string }) {
   if (!action) {
     return <button className="rounded-md border border-slate-700 px-2.5 py-1.5 text-xs font-medium text-slate-200" type="button">{label}</button>;
