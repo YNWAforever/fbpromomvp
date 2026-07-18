@@ -1,0 +1,382 @@
+{
+    "name":  "Off-peak rescue hourly monitor",
+    "nodes":  [
+                  {
+                      "parameters":  {
+                                         "rule":  {
+                                                      "interval":  [
+                                                                       {
+                                                                           "field":  "cronExpression",
+                                                                           "expression":  "0 * * * *"
+                                                                       }
+                                                                   ]
+                                                  },
+                                         "timezone":  "Asia/Hong_Kong"
+                                     },
+                      "id":  "hourly-schedule",
+                      "name":  "Hourly schedule",
+                      "type":  "n8n-nodes-base.scheduleTrigger",
+                      "typeVersion":  1.2,
+                      "position":  [
+                                       -760,
+                                       0
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "jsCode":  "const crypto = require(\"crypto\");\nconst scheduledAt = new Date().toISOString();\nconst timestamp = String(Date.now());\nconst payload = { runId: `hourly:${$execution.id}`, scheduledAt };\nconst body = JSON.stringify(payload);\nconst signature = crypto.createHmac(\"sha256\", $env.N8N_HMAC_SECRET).update(`${timestamp}.${body}`).digest(\"hex\");\nreturn [{ json: { body, timestamp, signature, idempotencyKey: payload.runId, attempt: 1 } }];"
+                                     },
+                      "id":  "hourly-sign-request",
+                      "name":  "Build signed monitor request",
+                      "type":  "n8n-nodes-base.code",
+                      "typeVersion":  2,
+                      "position":  [
+                                       -520,
+                                       0
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "method":  "POST",
+                                         "url":  "={{ $env.APP_BASE_URL + \u0027/api/jobs/monitor\u0027 }}",
+                                         "sendHeaders":  true,
+                                         "headerParameters":  {
+                                                                  "parameters":  [
+                                                                                     {
+                                                                                         "name":  "content-type",
+                                                                                         "value":  "application/json"
+                                                                                     },
+                                                                                     {
+                                                                                         "name":  "x-job-timestamp",
+                                                                                         "value":  "={{ $json.timestamp }}"
+                                                                                     },
+                                                                                     {
+                                                                                         "name":  "x-job-signature",
+                                                                                         "value":  "={{ $json.signature }}"
+                                                                                     },
+                                                                                     {
+                                                                                         "name":  "idempotency-key",
+                                                                                         "value":  "={{ $json.idempotencyKey }}"
+                                                                                     }
+                                                                                 ]
+                                                              },
+                                         "sendBody":  true,
+                                         "contentType":  "raw",
+                                         "rawContentType":  "application/json",
+                                         "body":  "={{ $json.body }}",
+                                         "options":  {
+                                                         "response":  {
+                                                                          "response":  {
+                                                                                           "neverError":  true,
+                                                                                           "fullResponse":  true
+                                                                                       }
+                                                                      }
+                                                     }
+                                     },
+                      "id":  "hourly-post-monitor",
+                      "name":  "POST monitor job",
+                      "type":  "n8n-nodes-base.httpRequest",
+                      "typeVersion":  4.2,
+                      "position":  [
+                                       -280,
+                                       0
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "jsCode":  "const statusCode = Number($json.responseStatusCode ?? 0);\nreturn [{ json: { ...$json, succeeded: statusCode \u003e= 200 \u0026\u0026 statusCode \u003c 300 } }];"
+                                     },
+                      "id":  "hourly-classify-response",
+                      "name":  "Classify monitor response",
+                      "type":  "n8n-nodes-base.code",
+                      "typeVersion":  2,
+                      "position":  [
+                                       -40,
+                                       0
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "conditions":  {
+                                                            "options":  {
+                                                                            "caseSensitive":  true,
+                                                                            "leftValue":  "",
+                                                                            "typeValidation":  "strict"
+                                                                        },
+                                                            "conditions":  [
+                                                                               {
+                                                                                   "id":  "monitor-succeeded",
+                                                                                   "leftValue":  "={{ $json.succeeded }}",
+                                                                                   "rightValue":  true,
+                                                                                   "operator":  {
+                                                                                                    "type":  "boolean",
+                                                                                                    "operation":  "true",
+                                                                                                    "singleValue":  true
+                                                                                                }
+                                                                               }
+                                                                           ]
+                                                        }
+                                     },
+                      "id":  "hourly-success",
+                      "name":  "Monitor succeeded?",
+                      "type":  "n8n-nodes-base.if",
+                      "typeVersion":  2.2,
+                      "position":  [
+                                       180,
+                                       0
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "conditions":  {
+                                                            "options":  {
+                                                                            "caseSensitive":  true,
+                                                                            "leftValue":  "",
+                                                                            "typeValidation":  "strict"
+                                                                        },
+                                                            "conditions":  [
+                                                                               {
+                                                                                   "id":  "monitor-retry",
+                                                                                   "leftValue":  "={{ $json.attempt \u003c= 3 }}",
+                                                                                   "rightValue":  true,
+                                                                                   "operator":  {
+                                                                                                    "type":  "boolean",
+                                                                                                    "operation":  "true",
+                                                                                                    "singleValue":  true
+                                                                                                }
+                                                                               }
+                                                                           ]
+                                                        }
+                                     },
+                      "id":  "hourly-retry-limit",
+                      "name":  "Retry attempts remain?",
+                      "type":  "n8n-nodes-base.if",
+                      "typeVersion":  2.2,
+                      "position":  [
+                                       400,
+                                       120
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "amount":  5,
+                                         "unit":  "seconds"
+                                     },
+                      "id":  "hourly-wait-retry",
+                      "name":  "Wait 5 seconds before retry",
+                      "type":  "n8n-nodes-base.wait",
+                      "typeVersion":  1.1,
+                      "position":  [
+                                       620,
+                                       80
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "jsCode":  "return [{ json: { ...$json, attempt: Number($json.attempt ?? 1) + 1 } }];"
+                                     },
+                      "id":  "hourly-increment-attempt",
+                      "name":  "Increment monitor attempt",
+                      "type":  "n8n-nodes-base.code",
+                      "typeVersion":  2,
+                      "position":  [
+                                       820,
+                                       80
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "method":  "POST",
+                                         "url":  "={{ $env.N8N_ALERT_WEBHOOK_URL }}",
+                                         "sendBody":  true,
+                                         "specifyBody":  "json",
+                                         "jsonBody":  "={\"workflow\":\"hourly-monitor\",\"executionId\":\"{{ $execution.id }}\",\"statusCode\":{{ $json.responseStatusCode ?? 0 }},\"attempt\":{{ $json.attempt ?? 4 }}}"
+                                     },
+                      "id":  "hourly-alert-failure",
+                      "name":  "Alert monitor failure",
+                      "type":  "n8n-nodes-base.httpRequest",
+                      "typeVersion":  4.2,
+                      "position":  [
+                                       620,
+                                       250
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "mode":  "combine",
+                                         "combineBy":  "combineByPosition",
+                                         "options":  {
+
+                                                     }
+                                     },
+                      "id":  "monitor-preserve-request-context",
+                      "name":  "Preserve signed monitor request context",
+                      "type":  "n8n-nodes-base.merge",
+                      "typeVersion":  3.2,
+                      "position":  [
+                                       -80,
+                                       130
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "jsCode":  "return [{ json: { responseStatusCode: Number($json.statusCode ?? 0), responseBody: $json.body, responseHeaders: $json.headers ?? {} } }];"
+                                     },
+                      "id":  "namespace-monitor-response",
+                      "name":  "Namespace monitor response",
+                      "type":  "n8n-nodes-base.code",
+                      "typeVersion":  2,
+                      "position":  [
+                                       -160,
+                                       60
+                                   ]
+                  }
+              ],
+    "pinData":  {
+
+                },
+    "connections":  {
+                        "Hourly schedule":  {
+                                                "main":  [
+                                                             [
+                                                                 {
+                                                                     "node":  "Build signed monitor request",
+                                                                     "type":  "main",
+                                                                     "index":  0
+                                                                 }
+                                                             ]
+                                                         ]
+                                            },
+                        "Build signed monitor request":  {
+                                                             "main":  [
+                                                                          [
+                                                                              {
+                                                                                  "node":  "POST monitor job",
+                                                                                  "type":  "main",
+                                                                                  "index":  0
+                                                                              },
+                                                                              {
+                                                                                  "node":  "Preserve signed monitor request context",
+                                                                                  "type":  "main",
+                                                                                  "index":  0
+                                                                              }
+                                                                          ]
+                                                                      ]
+                                                         },
+                        "POST monitor job":  {
+                                                 "main":  [
+                                                              [
+                                                                  {
+                                                                      "node":  "Namespace monitor response",
+                                                                      "type":  "main",
+                                                                      "index":  0
+                                                                  }
+                                                              ]
+                                                          ]
+                                             },
+                        "Classify monitor response":  {
+                                                          "main":  [
+                                                                       [
+                                                                           {
+                                                                               "node":  "Monitor succeeded?",
+                                                                               "type":  "main",
+                                                                               "index":  0
+                                                                           }
+                                                                       ]
+                                                                   ]
+                                                      },
+                        "Monitor succeeded?":  {
+                                                   "main":  [
+                                                                [
+
+                                                                ],
+                                                                [
+                                                                    {
+                                                                        "node":  "Retry attempts remain?",
+                                                                        "type":  "main",
+                                                                        "index":  0
+                                                                    }
+                                                                ]
+                                                            ]
+                                               },
+                        "Retry attempts remain?":  {
+                                                       "main":  [
+                                                                    [
+                                                                        {
+                                                                            "node":  "Wait 5 seconds before retry",
+                                                                            "type":  "main",
+                                                                            "index":  0
+                                                                        }
+                                                                    ],
+                                                                    [
+                                                                        {
+                                                                            "node":  "Alert monitor failure",
+                                                                            "type":  "main",
+                                                                            "index":  0
+                                                                        }
+                                                                    ]
+                                                                ]
+                                                   },
+                        "Wait 5 seconds before retry":  {
+                                                            "main":  [
+                                                                         [
+                                                                             {
+                                                                                 "node":  "Increment monitor attempt",
+                                                                                 "type":  "main",
+                                                                                 "index":  0
+                                                                             }
+                                                                         ]
+                                                                     ]
+                                                        },
+                        "Increment monitor attempt":  {
+                                                          "main":  [
+                                                                       [
+                                                                           {
+                                                                               "node":  "POST monitor job",
+                                                                               "type":  "main",
+                                                                               "index":  0
+                                                                           },
+                                                                           {
+                                                                               "node":  "Preserve signed monitor request context",
+                                                                               "type":  "main",
+                                                                               "index":  0
+                                                                           }
+                                                                       ]
+                                                                   ]
+                                                      },
+                        "Preserve signed monitor request context":  {
+                                                                        "main":  [
+                                                                                     [
+                                                                                         {
+                                                                                             "node":  "Classify monitor response",
+                                                                                             "type":  "main",
+                                                                                             "index":  0
+                                                                                         }
+                                                                                     ]
+                                                                                 ]
+                                                                    },
+                        "Namespace monitor response":  {
+                                                           "main":  [
+                                                                                     [
+{
+                                                                            "node":  "Preserve signed monitor request context",
+                                                                            "type":  "main",
+                                                                            "index":  1
+                                                                        }
+                                                                                     ]
+]
+                                                       }
+                    },
+    "active":  false,
+    "settings":  {
+                     "executionOrder":  "v1",
+                     "timezone":  "Asia/Hong_Kong"
+                 },
+    "versionId":  "6a112989-6567-4a23-b64f-4c06018faa11",
+    "meta":  {
+                 "templateCredsSetupCompleted":  true
+             },
+    "tags":  [
+
+             ]
+}

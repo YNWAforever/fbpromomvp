@@ -1,0 +1,382 @@
+{
+    "name":  "Off-peak rescue weekly report",
+    "nodes":  [
+                  {
+                      "parameters":  {
+                                         "rule":  {
+                                                      "interval":  [
+                                                                       {
+                                                                           "field":  "cronExpression",
+                                                                           "expression":  "0 9 * * 1"
+                                                                       }
+                                                                   ]
+                                                  },
+                                         "timezone":  "Asia/Hong_Kong"
+                                     },
+                      "id":  "weekly-schedule",
+                      "name":  "Weekly schedule",
+                      "type":  "n8n-nodes-base.scheduleTrigger",
+                      "typeVersion":  1.2,
+                      "position":  [
+                                       -760,
+                                       0
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "jsCode":  "const crypto = require(\"crypto\");\nconst scheduledAt = new Date().toISOString();\nconst timestamp = String(Date.now());\nconst hongKongParts = new Intl.DateTimeFormat(\"en-CA\", { timeZone: \"Asia/Hong_Kong\", year: \"numeric\", month: \"2-digit\", day: \"2-digit\" }).formatToParts(new Date());\nconst value = (type) =\u003e hongKongParts.find((part) =\u003e part.type === type).value;\nconst hongKongMidnight = new Date(Date.UTC(Number(value(\"year\")), Number(value(\"month\")) - 1, Number(value(\"day\"))));\nconst daysSinceMonday = (hongKongMidnight.getUTCDay() + 6) % 7;\nconst periodEndDate = new Date(hongKongMidnight);\nperiodEndDate.setUTCDate(hongKongMidnight.getUTCDate() - daysSinceMonday);\nconst periodStartDate = new Date(periodEndDate);\nperiodStartDate.setUTCDate(periodEndDate.getUTCDate() - 7);\nconst periodStart = periodStartDate.toISOString();\nconst periodEnd = periodEndDate.toISOString();\nconst payload = { runId: `weekly:${$execution.id}`, periodStart, periodEnd };\nconst body = JSON.stringify(payload);\nconst signature = crypto.createHmac(\"sha256\", $env.N8N_HMAC_SECRET).update(`${timestamp}.${body}`).digest(\"hex\");\nreturn [{ json: { body, timestamp, signature, idempotencyKey: payload.runId, attempt: 1 } }];"
+                                     },
+                      "id":  "weekly-sign-request",
+                      "name":  "Build signed weekly report request",
+                      "type":  "n8n-nodes-base.code",
+                      "typeVersion":  2,
+                      "position":  [
+                                       -520,
+                                       0
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "method":  "POST",
+                                         "url":  "={{ $env.APP_BASE_URL + \u0027/api/jobs/weekly-report\u0027 }}",
+                                         "sendHeaders":  true,
+                                         "headerParameters":  {
+                                                                  "parameters":  [
+                                                                                     {
+                                                                                         "name":  "content-type",
+                                                                                         "value":  "application/json"
+                                                                                     },
+                                                                                     {
+                                                                                         "name":  "x-job-timestamp",
+                                                                                         "value":  "={{ $json.timestamp }}"
+                                                                                     },
+                                                                                     {
+                                                                                         "name":  "x-job-signature",
+                                                                                         "value":  "={{ $json.signature }}"
+                                                                                     },
+                                                                                     {
+                                                                                         "name":  "idempotency-key",
+                                                                                         "value":  "={{ $json.idempotencyKey }}"
+                                                                                     }
+                                                                                 ]
+                                                              },
+                                         "sendBody":  true,
+                                         "contentType":  "raw",
+                                         "rawContentType":  "application/json",
+                                         "body":  "={{ $json.body }}",
+                                         "options":  {
+                                                         "response":  {
+                                                                          "response":  {
+                                                                                           "neverError":  true,
+                                                                                           "fullResponse":  true
+                                                                                       }
+                                                                      }
+                                                     }
+                                     },
+                      "id":  "hourly-post-monitor",
+                      "name":  "POST weekly report job",
+                      "type":  "n8n-nodes-base.httpRequest",
+                      "typeVersion":  4.2,
+                      "position":  [
+                                       -280,
+                                       0
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "jsCode":  "const statusCode = Number($json.responseStatusCode ?? 0);\nreturn [{ json: { ...$json, succeeded: statusCode \u003e= 200 \u0026\u0026 statusCode \u003c 300 } }];"
+                                     },
+                      "id":  "weekly-classify-response",
+                      "name":  "Classify weekly report response",
+                      "type":  "n8n-nodes-base.code",
+                      "typeVersion":  2,
+                      "position":  [
+                                       -40,
+                                       0
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "conditions":  {
+                                                            "options":  {
+                                                                            "caseSensitive":  true,
+                                                                            "leftValue":  "",
+                                                                            "typeValidation":  "strict"
+                                                                        },
+                                                            "conditions":  [
+                                                                               {
+                                                                                   "id":  "weekly-succeeded",
+                                                                                   "leftValue":  "={{ $json.succeeded }}",
+                                                                                   "rightValue":  true,
+                                                                                   "operator":  {
+                                                                                                    "type":  "boolean",
+                                                                                                    "operation":  "true",
+                                                                                                    "singleValue":  true
+                                                                                                }
+                                                                               }
+                                                                           ]
+                                                        }
+                                     },
+                      "id":  "hourly-success",
+                      "name":  "Weekly report succeeded?",
+                      "type":  "n8n-nodes-base.if",
+                      "typeVersion":  2.2,
+                      "position":  [
+                                       180,
+                                       0
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "conditions":  {
+                                                            "options":  {
+                                                                            "caseSensitive":  true,
+                                                                            "leftValue":  "",
+                                                                            "typeValidation":  "strict"
+                                                                        },
+                                                            "conditions":  [
+                                                                               {
+                                                                                   "id":  "weekly-retry",
+                                                                                   "leftValue":  "={{ $json.attempt \u003c= 3 }}",
+                                                                                   "rightValue":  true,
+                                                                                   "operator":  {
+                                                                                                    "type":  "boolean",
+                                                                                                    "operation":  "true",
+                                                                                                    "singleValue":  true
+                                                                                                }
+                                                                               }
+                                                                           ]
+                                                        }
+                                     },
+                      "id":  "hourly-retry-limit",
+                      "name":  "Weekly retry attempts remain?",
+                      "type":  "n8n-nodes-base.if",
+                      "typeVersion":  2.2,
+                      "position":  [
+                                       400,
+                                       120
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "amount":  5,
+                                         "unit":  "seconds"
+                                     },
+                      "id":  "hourly-wait-retry",
+                      "name":  "Wait 5 seconds before retry",
+                      "type":  "n8n-nodes-base.wait",
+                      "typeVersion":  1.1,
+                      "position":  [
+                                       620,
+                                       80
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "jsCode":  "return [{ json: { ...$json, attempt: Number($json.attempt ?? 1) + 1 } }];"
+                                     },
+                      "id":  "weekly-increment-attempt",
+                      "name":  "Increment weekly report attempt",
+                      "type":  "n8n-nodes-base.code",
+                      "typeVersion":  2,
+                      "position":  [
+                                       820,
+                                       80
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "method":  "POST",
+                                         "url":  "={{ $env.N8N_ALERT_WEBHOOK_URL }}",
+                                         "sendBody":  true,
+                                         "specifyBody":  "json",
+                                         "jsonBody":  "={\"workflow\":\"weekly-report\",\"executionId\":\"{{ $execution.id }}\",\"statusCode\":{{ $json.responseStatusCode ?? 0 }},\"attempt\":{{ $json.attempt ?? 4 }}}"
+                                     },
+                      "id":  "weekly-alert-failure",
+                      "name":  "Alert weekly report failure",
+                      "type":  "n8n-nodes-base.httpRequest",
+                      "typeVersion":  4.2,
+                      "position":  [
+                                       620,
+                                       250
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "mode":  "combine",
+                                         "combineBy":  "combineByPosition",
+                                         "options":  {
+
+                                                     }
+                                     },
+                      "id":  "weekly report-preserve-request-context",
+                      "name":  "Preserve signed weekly report request context",
+                      "type":  "n8n-nodes-base.merge",
+                      "typeVersion":  3.2,
+                      "position":  [
+                                       -80,
+                                       130
+                                   ]
+                  },
+                  {
+                      "parameters":  {
+                                         "jsCode":  "return [{ json: { responseStatusCode: Number($json.statusCode ?? 0), responseBody: $json.body, responseHeaders: $json.headers ?? {} } }];"
+                                     },
+                      "id":  "namespace-weekly-report-response",
+                      "name":  "Namespace weekly report response",
+                      "type":  "n8n-nodes-base.code",
+                      "typeVersion":  2,
+                      "position":  [
+                                       -160,
+                                       60
+                                   ]
+                  }
+              ],
+    "pinData":  {
+
+                },
+    "connections":  {
+                        "Weekly schedule":  {
+                                                "main":  [
+                                                             [
+                                                                 {
+                                                                     "node":  "Build signed weekly report request",
+                                                                     "type":  "main",
+                                                                     "index":  0
+                                                                 }
+                                                             ]
+                                                         ]
+                                            },
+                        "Build signed weekly report request":  {
+                                                                   "main":  [
+                                                                                [
+                                                                                    {
+                                                                                        "node":  "POST weekly report job",
+                                                                                        "type":  "main",
+                                                                                        "index":  0
+                                                                                    },
+                                                                                    {
+                                                                                        "node":  "Preserve signed weekly report request context",
+                                                                                        "type":  "main",
+                                                                                        "index":  0
+                                                                                    }
+                                                                                ]
+                                                                            ]
+                                                               },
+                        "POST weekly report job":  {
+                                                       "main":  [
+                                                                    [
+                                                                        {
+                                                                            "node":  "Namespace weekly report response",
+                                                                            "type":  "main",
+                                                                            "index":  0
+                                                                        }
+                                                                    ]
+                                                                ]
+                                                   },
+                        "Classify weekly report response":  {
+                                                                "main":  [
+                                                                             [
+                                                                                 {
+                                                                                     "node":  "Weekly report succeeded?",
+                                                                                     "type":  "main",
+                                                                                     "index":  0
+                                                                                 }
+                                                                             ]
+                                                                         ]
+                                                            },
+                        "Weekly report succeeded?":  {
+                                                         "main":  [
+                                                                      [
+
+                                                                      ],
+                                                                      [
+                                                                          {
+                                                                              "node":  "Weekly retry attempts remain?",
+                                                                              "type":  "main",
+                                                                              "index":  0
+                                                                          }
+                                                                      ]
+                                                                  ]
+                                                     },
+                        "Weekly retry attempts remain?":  {
+                                                              "main":  [
+                                                                           [
+                                                                               {
+                                                                                   "node":  "Wait 5 seconds before retry",
+                                                                                   "type":  "main",
+                                                                                   "index":  0
+                                                                               }
+                                                                           ],
+                                                                           [
+                                                                               {
+                                                                                   "node":  "Alert weekly report failure",
+                                                                                   "type":  "main",
+                                                                                   "index":  0
+                                                                               }
+                                                                           ]
+                                                                       ]
+                                                          },
+                        "Wait 5 seconds before retry":  {
+                                                            "main":  [
+                                                                         [
+                                                                             {
+                                                                                 "node":  "Increment weekly report attempt",
+                                                                                 "type":  "main",
+                                                                                 "index":  0
+                                                                             }
+                                                                         ]
+                                                                     ]
+                                                        },
+                        "Increment weekly report attempt":  {
+                                                                "main":  [
+                                                                             [
+                                                                                 {
+                                                                                     "node":  "POST weekly report job",
+                                                                                     "type":  "main",
+                                                                                     "index":  0
+                                                                                 },
+                                                                                 {
+                                                                                     "node":  "Preserve signed weekly report request context",
+                                                                                     "type":  "main",
+                                                                                     "index":  0
+                                                                                 }
+                                                                             ]
+                                                                         ]
+                                                            },
+                        "Preserve signed weekly report request context":  {
+                                                                              "main":  [
+                                                                                           [
+                                                                                               {
+                                                                                                   "node":  "Classify weekly report response",
+                                                                                                   "type":  "main",
+                                                                                                   "index":  0
+                                                                                               }
+                                                                                           ]
+                                                                                       ]
+                                                                          },
+                        "Namespace weekly report response":  {
+                                                                 "main":  [
+                                                                                     [
+{
+                                                                                  "node":  "Preserve signed weekly report request context",
+                                                                                  "type":  "main",
+                                                                                  "index":  1
+                                                                              }
+                                                                                     ]
+]
+                                                             }
+                    },
+    "active":  false,
+    "settings":  {
+                     "executionOrder":  "v1",
+                     "timezone":  "Asia/Hong_Kong"
+                 },
+    "versionId":  "b4e01095-0311-4f36-9e4d-373e720861a7",
+    "meta":  {
+                 "templateCredsSetupCompleted":  true
+             },
+    "tags":  [
+
+             ]
+}
