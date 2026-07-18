@@ -1,0 +1,10 @@
+{
+  "available": true,
+  "providerVenueId": "fake-besttime-harbour-cafe",
+  "matchedName": "Harbour Cafe",
+  "matchedAddress": "18 Pier Road, Central",
+  "forecast": {
+    "weekday": [42, 48, 56],
+    "source": "fake-besttime"
+  }
+}

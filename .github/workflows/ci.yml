@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      # Preview semantics keep all provider credentials optional. Tests use fakes.
+      VERCEL_ENV: preview
+      DATABASE_URL: postgresql://test:test@example.test/off_peak_rescue_test
+      AUTH_SECRET: "12345678901234567890123456789012"
+      AUTH_GOOGLE_ID: test-google-id
+      AUTH_GOOGLE_SECRET: test-google-secret
+      ADMIN_EMAILS: ops@example.com
+      N8N_HMAC_SECRET: "12345678901234567890123456789012"
+      OWNER_LINK_SECRET: abcdefghijklmnopqrstuvwxyz123456
+      APP_BASE_URL: http://localhost:3000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run test
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
