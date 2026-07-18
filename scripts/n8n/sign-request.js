@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
 const crypto = require("node:crypto");
 
 function sign(body, timestamp, secret) {

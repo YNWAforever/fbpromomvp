@@ -1,0 +1,18 @@
+[
+  {
+    "observedAt": "2026-07-14T03:00:00.000Z",
+    "forecastedBusyness": 65,
+    "liveBusyness": 47,
+    "delta": -18,
+    "status": "ok",
+    "providerRequestId": "fake-live-1"
+  },
+  {
+    "observedAt": "2026-07-14T04:00:00.000Z",
+    "forecastedBusyness": 65,
+    "liveBusyness": 40,
+    "delta": -25,
+    "status": "ok",
+    "providerRequestId": "fake-live-2"
+  }
+]
