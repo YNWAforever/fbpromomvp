@@ -76,7 +76,10 @@ describe("n8n workflow exports", () => {
     expect(signer?.parameters?.jsCode).toContain('createHmac("sha256"');
     expect(hourly.nodes.some((node) => node.name === "Wait 5 seconds before retry")).toBe(true);
     expect(JSON.stringify(hourly.nodes.find((node) => node.name === 'Retry attempts remain?')?.parameters?.conditions)).toContain('<= 3');
-    expect(hourly.nodes.find((node) => node.name === 'Alert monitor failure')?.parameters?.jsonBody).toContain('?? 4');
+    const alertBody = String(hourly.nodes.find((node) => node.name === 'Alert monitor failure')?.parameters?.jsonBody);
+    expect(alertBody).toMatch(/^=\{\{ \{/);
+    expect(alertBody).toContain('$json.responseStatusCode');
+    expect(alertBody).toContain('$json.attempt ?? 4');
     expect(hourly.nodes.some((node) => node.name === "Alert monitor failure")).toBe(true);
     expect(hourly.nodes.some((node) => node.name === "Preserve signed monitor request context" && node.type === "n8n-nodes-base.merge")).toBe(true);
     expect(hourly.connections["Build signed monitor request"].main[0]).toEqual(expect.arrayContaining([
@@ -119,7 +122,10 @@ describe("n8n workflow exports", () => {
     expect(signer?.parameters?.jsCode).toContain("weekly:${$execution.id}");
     expect(weekly.nodes.some((node) => node.name === "Wait 5 seconds before retry")).toBe(true);
     expect(JSON.stringify(weekly.nodes.find((node) => node.name === 'Weekly retry attempts remain?')?.parameters?.conditions)).toContain('<= 3');
-    expect(weekly.nodes.find((node) => node.name === 'Alert weekly report failure')?.parameters?.jsonBody).toContain('?? 4');
+    const alertBody = String(weekly.nodes.find((node) => node.name === 'Alert weekly report failure')?.parameters?.jsonBody);
+    expect(alertBody).toMatch(/^=\{\{ \{/);
+    expect(alertBody).toContain('$json.responseStatusCode');
+    expect(alertBody).toContain('$json.attempt ?? 4');
     expect(weekly.nodes.some((node) => node.name === "Alert weekly report failure")).toBe(true);
     expect(weekly.nodes.some((node) => node.name === "Preserve signed weekly report request context" && node.type === "n8n-nodes-base.merge")).toBe(true);
     expect(weekly.connections["Build signed weekly report request"].main[0]).toEqual(expect.arrayContaining([

@@ -190,7 +190,7 @@
                                          "url":  "={{ $env.N8N_ALERT_WEBHOOK_URL }}",
                                          "sendBody":  true,
                                          "specifyBody":  "json",
-                                         "jsonBody":  "={\"workflow\":\"hourly-monitor\",\"executionId\":\"{{ $execution.id }}\",\"statusCode\":{{ $json.responseStatusCode ?? 0 }},\"attempt\":{{ $json.attempt ?? 4 }}}"
+                                         "jsonBody":  "={{ { workflow: \"hourly-monitor\", executionId: $execution.id, statusCode: $json.responseStatusCode ?? 0, attempt: $json.attempt ?? 4 } }}"
                                      },
                       "id":  "hourly-alert-failure",
                       "name":  "Alert monitor failure",

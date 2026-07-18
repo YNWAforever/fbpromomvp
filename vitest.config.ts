@@ -1,5 +1,5 @@
 import react from "@vitejs/plugin-react";
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 import { fileURLToPath } from "node:url";
 
 export default defineConfig({
@@ -12,6 +12,7 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     setupFiles: ["./vitest.setup.ts"],
+    exclude: [...configDefaults.exclude, "tests/e2e/**"],
     env: {
       DATABASE_URL: "postgresql://test:test@example.test/test",
       AUTH_SECRET: "12345678901234567890123456789012",

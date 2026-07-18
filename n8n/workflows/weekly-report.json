@@ -190,7 +190,7 @@
                                          "url":  "={{ $env.N8N_ALERT_WEBHOOK_URL }}",
                                          "sendBody":  true,
                                          "specifyBody":  "json",
-                                         "jsonBody":  "={\"workflow\":\"weekly-report\",\"executionId\":\"{{ $execution.id }}\",\"statusCode\":{{ $json.responseStatusCode ?? 0 }},\"attempt\":{{ $json.attempt ?? 4 }}}"
+                                         "jsonBody":  "={{ { workflow: \"weekly-report\", executionId: $execution.id, statusCode: $json.responseStatusCode ?? 0, attempt: $json.attempt ?? 4 } }}"
                                      },
                       "id":  "weekly-alert-failure",
                       "name":  "Alert weekly report failure",
