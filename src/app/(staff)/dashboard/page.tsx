@@ -1,3 +1,5 @@
+import { requireStaff } from "@/lib/auth/require-staff";
+
 const emptyStates = [
   {
     title: "Active venues",
@@ -13,7 +15,8 @@ const emptyStates = [
   },
 ];
 
-export default function DashboardPage() {
+export default async function DashboardPage() {
+  await requireStaff();
   return (
     <div>
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
