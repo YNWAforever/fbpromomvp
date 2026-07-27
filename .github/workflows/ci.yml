@@ -35,3 +35,47 @@ jobs:
       - run: npm run build
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
+
+  # Verifies the committed migrations against a real Postgres. The composite
+  # foreign keys and CHECK constraints the application relies on are enforced
+  # by the database, so they cannot be covered by the fake-provider suites.
+  integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: off_peak_rescue_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      # The Neon serverless driver speaks Postgres over a WebSocket, so a plain
+      # Postgres container is unreachable without this proxy in front of it.
+      wsproxy:
+        image: ghcr.io/neondatabase/wsproxy:latest
+        env:
+          APPEND_PORT: "postgres:5432"
+          ALLOW_ADDR_REGEX: ".*"
+        ports:
+          - 5480:80
+    env:
+      TEST_DATABASE_URL: postgresql://test:test@localhost:5432/off_peak_rescue_test
+      NEON_WS_PROXY: localhost:5480/v1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Apply committed migrations in journal order
+        run: |
+          node -e "require('./drizzle/meta/_journal.json').entries.forEach(e => console.log('drizzle/' + e.tag + '.sql'))" \
+            | xargs -I{} psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -q -f {}
+      - run: npm run test:integration
